@@ -29,12 +29,30 @@
     // изоляция и прокладки
     { code: 'A02.07.001', name: /optra/i,           mod: { tpl: ['caries', 'endo', 'hygiene'], key: 'isol', value: 'ретрактором OptraGate' }, label: 'Изоляция OptraGate' },
     { code: 'A02.07.001', name: /коффердам/i,       mod: { tpl: ['caries', 'endo'], key: 'isol', value: 'коффердамом' }, label: 'Изоляция коффердам' },
-    { code: 'A16.07.002', name: /лечебн\S* прокладк/i,   mod: { tpl: ['caries', 'endoRestore'], key: 'liner', add: 'cal' }, label: 'Лечебная прокладка' },
-    { code: 'A16.07.002', name: /изолирующ\S* прокладк/i, mod: { tpl: ['caries', 'endoRestore'], key: 'liner', add: 'gic' }, label: 'Изолирующая прокладка' },
+    { code: 'A16.07.002', name: /лечебн\S* прокладк/i,   mod: { tpl: ['caries', 'endo'], key: 'liner', add: 'cal' }, label: 'Лечебная прокладка' },
+    { code: 'A16.07.002', name: /изолирующ\S* прокладк/i, mod: { tpl: ['caries', 'endo'], key: 'liner', add: 'gic' }, label: 'Изолирующая прокладка' },
     // профессиональная гигиена
     { code: 'A16.07.051', name: /менее 14/i, block: { tpl: 'hygiene', merge: true, mergeAll: true, params: { scope: 'partial' } }, label: 'Гигиена (менее 14 зубов)' },
     { code: 'A16.07.051', block: { tpl: 'hygiene', merge: true, mergeAll: true, params: { scope: 'full' } }, label: 'Гигиена (полный комплекс)' },
     { code: 'A22.07.002', block: { tpl: 'hygiene', merge: true, mergeAll: true, qtyIsTeeth: true, params: { scope: 'teeth' } }, label: 'Гигиена: УЗ в области зуба' },
+    // трепанация, временные пломбы, сошлифовывание, штифты, тип пломбы (меняют параметры блоков кариеса/эндо)
+    { code: 'A16.07.092', name: /пломб/i, mod: { tpl: ['caries', 'endo'], set: { prev: 'old' } }, label: 'Удаление старой пломбы' },
+    { code: 'A16.07.092', name: /цельнолит|металлокерам/i, mod: { tpl: ['endo'], set: { prev: 'crown' } }, label: 'Трепанация коронки' },
+    { code: 'A16.07.092', info: true, label: 'Трепанация зуба' },
+    { code: 'A16.07.091', mod: { tpl: ['caries', 'endo'], set: { tempOff: true, visit: 'repeat' } }, label: 'Снятие временной пломбы' },
+    { code: 'A16.07.002.009', mod: { tpl: ['caries', 'endo'], set: { tempOn: true, finish: 'temp' } }, label: 'Временная пломба' },
+    { code: 'A16.07.031', name: /стекловолок/i, pass: true, mod: { tpl: ['caries', 'endo'], set: { post: 'fiber' } }, label: 'Реставрация со стекловолоконным штифтом' },
+    { code: 'A16.07.031', pass: true, mod: { tpl: ['caries', 'endo'], set: { post: 'metal' } }, label: 'Реставрация с анкерным штифтом' },
+    { code: 'A16.07.002.001', pass: true, mod: { tpl: ['caries', 'endo'], set: { material: 'стеклоиономерным цементом' } }, label: 'Пломба (цемент)' },
+    { code: 'A16.07.002.011', pass: true, mod: { tpl: ['caries'], set: { black: 'II' } }, label: 'Пломба II–III класс' },
+    { code: 'A16.07.002.012', pass: true, mod: { tpl: ['caries'], set: { black: 'IV' } }, label: 'Пломба IV класс' },
+    { code: 'A16.07.002', name: /эстетическ/i, pass: true, mod: { tpl: ['caries'], set: { resto: 'aesthetic' } }, label: 'Эстетическая реставрация' },
+    { code: 'A16.07.002', name: /винир/i, unmatched: true, label: 'Композитный винир' },
+    { code: 'A16.07.025.001', info: true, label: 'Полирование реставраций' },
+    // герметизация, ICON, фторирование
+    { code: 'A16.07.057', block: { tpl: 'prevent', merge: true, mergeBy: 'method', qtyIsTeeth: true, params: { method: 'seal' } }, label: 'Герметизация фиссур' },
+    { code: 'A16.07.002', name: /icon/i, block: { tpl: 'prevent', merge: true, mergeBy: 'method', qtyIsTeeth: true, params: { method: 'icon' } }, label: 'ICON' },
+    { code: 'A11.07.012', block: { tpl: 'prevent', merge: true, mergeBy: 'method', params: { method: 'fluor' } }, label: 'Глубокое фторирование' },
     // эндодонтия: каждая услуга отмечает этап в блоке «Эндодонтия» того же зуба
     { code: 'A16.07.002', name: /этапе эндолечения/i, block: { tpl: 'endo', merge: true, params: { stages: ['wall'] } }, label: 'Эндо: восстановление стенки' },
     { code: 'A16.07.009', block: { tpl: 'endo', merge: true, params: { stages: ['pulpotomy'] } }, label: 'Эндо: пульпотомия' },
@@ -47,6 +65,7 @@
     { code: 'A16.07.030', name: /конусност/i, block: { tpl: 'endo', merge: true, params: { stages: ['shaping'], instr: 'rotary' }, hint: (b, s) => canalHint(b, s.qty) }, label: 'Эндо: обработка NiTi' },
     { code: 'A16.07.030', block: { tpl: 'endo', merge: true, params: { stages: ['shaping'] }, hint: (b, s) => canalHint(b, s.qty) }, label: 'Эндо: обработка каналов' },
     { code: 'A16.07.008.002', block: { tpl: 'endo', merge: true, params: { stages: ['obtur'] }, hint: (b, s) => canalHint(b, countFromName(s.name) || s.qty) }, label: 'Эндо: пломбирование каналов' },
+    { code: 'A16.07.082', mod: { tpl: ['caries', 'endo'], set: { grind: true } }, label: 'Сошлифовывание' },
     { code: 'B01.003.004.004', block: { tpl: 'anesthesia', params: { kind: 'Аппликационная', drug: 'гель Lidocaini 10%' }, sort: 1 }, label: 'Аппликационная' },
     { code: 'B01.003.004.005', block: { tpl: 'anesthesia', params: { kind: 'Инфильтрационная' }, sort: 2 }, label: 'Инфильтрационная' },
     { code: 'B01.003.004.002', block: { tpl: 'anesthesia', params: { kind: 'Проводниковая мандибулярная' }, sort: 3 }, label: 'Проводниковая' },
@@ -127,7 +146,7 @@
     },
 
     {
-      id: 'caries', title: 'Кариес', icon: '🦷', position: 'therapist', order: 20, triggers: ['A16.07.002'], needTeeth: true, qtyIsTeeth: true,
+      id: 'caries', title: 'Кариес', icon: '🦷', position: 'therapist', order: 20, triggers: ['A16.07.002', 'A16.07.031'], needTeeth: true, qtyIsTeeth: true,
       params: [
         { key: 'depth', label: 'Глубина', type: 'seg', options: [
           opt('enamel', 'Эмаль', { mkb: ['K02.0', 'K02.0 Кариес эмали'], word: 'эмали' }),
@@ -138,17 +157,19 @@
           opt('окклюзионной', 'O'), opt('медиальной', 'M'), opt('дистальной', 'D'), opt('вестибулярной', 'V'), opt('оральной', 'L/P'), opt('пришеечной', 'Пришеечн.'),
         ], default: ['окклюзионной'] },
         { key: 'black', label: 'Класс по Блэку', type: 'seg', options: ['I', 'II', 'III', 'IV', 'V', 'VI'].map((x) => opt(x)), default: 'I' },
-        { key: 'since', label: 'Беспокоит', type: 'select', options: [opt('нескольких дней'), opt('1–2 недель'), opt('месяца'), opt('нескольких месяцев'), opt('', 'Не беспокоит (санация)')], default: '1–2 недель' },
-        { key: 'prev', label: 'Ранее', type: 'seg', options: [opt('no', 'Не лечен'), opt('lost', 'Пломба утрачена')], default: 'no' },
+        { key: 'prev', label: 'Ранее', type: 'seg', options: [opt('no', 'Не лечен'), opt('old', 'Старая пломба'), opt('lost', 'Пломба утрачена')], default: 'no' },
         { key: 'isol', label: 'Изоляция', type: 'select', options: [opt('', 'Нет'), opt('коффердамом', 'Коффердам'), opt('ретрактором OptraGate', 'OptraGate'), opt('ватными валиками и слюноотсосом', 'Ватные валики')], default: '' },
-        { key: 'adhesive', label: 'Адгезив', type: 'select', options: ADHESIVES },
-        { key: 'liner', label: 'Прокладка', type: 'chips', options: [
-          opt('cal', 'Лечебная (Ca(OH)₂)', { text: 'Наложение лечебной прокладки на основе гидроксида кальция.' }),
-          opt('gic', 'Изолирующая СИЦ', { text: 'Наложение изолирующей прокладки из стеклоиономерного цемента.' }),
-          opt('flow', 'Изолирующая текучий', { text: 'Наложение изолирующей прокладки из текучего композита.' }),
-        ], default: [] },
         { key: 'material', label: 'Материал', type: 'select', options: MATERIALS },
-        { key: 'xray', label: 'Рентген', type: 'seg', options: [opt('', 'Нет'), opt('yes', 'Есть')], default: '' },
+        { key: 'resto', label: 'Реставрация', type: 'seg', options: [opt('std', 'Обычная'), opt('aesthetic', 'Эстетическая')], default: 'std', adv: true },
+        { key: 'since', label: 'Беспокоит', type: 'select', options: [opt('нескольких дней'), opt('1–2 недель'), opt('месяца'), opt('нескольких месяцев'), opt('', 'Не беспокоит (санация)')], default: '1–2 недель', adv: true },
+        { key: 'adhesive', label: 'Адгезив', type: 'select', options: ADHESIVES, adv: true },
+        { key: 'liner', label: 'Прокладка', type: 'chips', options: LINER_OPTS, default: [], adv: true },
+        { key: 'post', label: 'Штифт', type: 'seg', options: [opt('', 'Нет'), opt('fiber', 'Стекловолоконный'), opt('metal', 'Анкерный металлический')], default: '', adv: true },
+        { key: 'postCanal', label: 'Штифт в канал', type: 'text', placeholder: 'необязательно, напр.: Н', show: (p) => !!p.post, adv: true },
+        { key: 'tempOff', label: 'Снятие врем. пломбы', type: 'toggle', default: false, adv: true },
+        { key: 'tempOn', label: 'Временная пломба вместо постоянной', type: 'toggle', default: false, adv: true },
+        { key: 'grind', label: 'Сошлифовывание', type: 'toggle', default: false, adv: true },
+        { key: 'xray', label: 'Рентген', type: 'seg', options: [opt('', 'Нет'), opt('yes', 'Есть')], default: '', adv: true },
       ],
       mkb: (p, P) => P.depth.mkb,
       fields: (p, T, P) => {
@@ -158,22 +179,77 @@
           dentin: 'Жалобы на кратковременную боль от сладкого и холодного в области ' + T.gen + ', проходящую сразу после устранения раздражителя.',
           cement: 'Жалобы на кратковременную боль от холодного и при чистке зубов в пришеечной области ' + T.gen + '.',
         }[p.depth];
-        const sl = p.depth === 'enamel'
-          ? 'На ' + surf + ' поверхности ' + T.gen + ' дефект в пределах эмали с пигментированным дном. Зондирование безболезненно. Перкуссия безболезненна. Реакция на холод отсутствует.'
-          : 'На ' + surf + ' поверхности ' + T.gen + ' кариозная полость в пределах ' + P.depth.word + ', выполненная размягчённым пигментированным дентином. ' +
-            'Зондирование болезненно по эмалево-дентинной границе. Перкуссия безболезненна. Реакция на холод кратковременная, проходит сразу после устранения раздражителя. ' +
-            'Слизистая оболочка в области ' + T.gen + ' без патологических изменений.';
+        const where = 'На ' + surf + ' поверхности ' + T.gen + ' ';
+        const lesion = p.prev === 'old' ? 'пломба с нарушением краевого прилегания, под пломбой — кариозная полость в пределах ' + P.depth.word
+          : p.prev === 'lost' ? 'пломба частично утрачена, кариозная полость в пределах ' + P.depth.word
+          : p.depth === 'enamel' ? 'дефект в пределах эмали с пигментированным дном' : 'кариозная полость в пределах ' + P.depth.word + ', выполненная размягчённым пигментированным дентином';
+        const sl = p.tempOff ? 'Временная пломба на ' + T.loc + ' сохранна. ' + where + 'кариозная полость в пределах ' + P.depth.word + ' (под временной пломбой).'
+          : where + lesion + '. ' + (p.depth === 'enamel' ? 'Зондирование безболезненно. Перкуссия безболезненна. Реакция на холод отсутствует.'
+            : 'Зондирование болезненно по эмалево-дентинной границе. Перкуссия безболезненна. Реакция на холод кратковременная, проходит сразу после устранения раздражителя. ' +
+              'Слизистая оболочка в области ' + T.gen + ' без патологических изменений.');
+        const t = [];
+        if (p.tempOff) t.push('Снятие временной пломбы.');
+        if (p.isol) t.push('Изоляция ' + p.isol + '.');
+        if (p.prev === 'old') t.push('Удаление старой пломбы.');
+        if (p.grind) t.push('Сошлифовывание острых краёв эмали.');
+        t.push('Препарирование кариозной полости, некрэктомия. Медикаментозная обработка раствором хлоргексидина 0,05%.');
+        if (linerText(p.liner)) t.push(linerText(p.liner).trim());
+        if (p.tempOn) t.push('Наложение временной пломбы.');
+        else {
+          if (p.post) t.push('Установка ' + (p.post === 'fiber' ? 'стекловолоконного' : 'металлического анкерного') + ' штифта' + (p.postCanal ? ' в канал ' + p.postCanal : '') + (p.post === 'fiber' ? ' на композитный цемент.' : '.'));
+          t.push('Адгезивная подготовка: ' + p.adhesive + '.');
+          t.push(p.resto === 'aesthetic' ? 'Эстетическая реставрация ' + p.material + ' послойно с восстановлением анатомической формы и цвета зуба.' : 'Восстановление ' + p.material + ' послойно.');
+          t.push('Финишная обработка, шлифовка, полировка. Окклюзия проверена.');
+        }
+        const tx = t.join(' ');
         return {
-          complaints: p.since ? complaints : 'Жалоб нет. Обратился с целью санации полости рта.',
-          anamnesisMorbi: (p.since ? 'Со слов пациента, ' + T.nom + ' беспокоит в течение ' + p.since + '. ' : '') +
-            (p.prev === 'lost' ? 'Ранее ' + T.nom + ' лечен(ы), пломба частично утрачена.' : 'Ранее по поводу ' + T.gen + ' не лечился.'),
+          complaints: p.tempOff ? 'Жалоб нет. Явился для продолжения лечения ' + T.gen + '.' : p.since ? complaints : 'Жалоб нет. Обратился с целью санации полости рта.',
+          anamnesisMorbi: (p.since && !p.tempOff ? 'Со слов пациента, ' + T.nom + ' беспокоит в течение ' + p.since + '. ' : '') +
+            (p.tempOff ? T.Nom + ' на этапе лечения, под временной пломбой.' : p.prev === 'old' ? 'Ранее ' + T.nom + ' лечен(ы), пломба с нарушением краевого прилегания.'
+              : p.prev === 'lost' ? 'Ранее ' + T.nom + ' лечен(ы), пломба частично утрачена.' : 'Ранее по поводу ' + T.gen + ' не лечился.'),
           statusLocalis: sl,
           xray: p.xray ? 'На прицельной рентгенограмме ' + T.gen + ': очаг деструкции твёрдых тканей в пределах ' + P.depth.word + ', связь с полостью зуба не определяется, периапикальные ткани без патологических изменений.' : '',
           diagnosis: P.depth.mkb[1].replace(/^K\S+\s/, '') + ' ' + T.gen + ' (' + p.black + ' класс по Блэку), ' + P.depth.mkb[0] + '.',
-          treatment: T.Nom + ': ' + (p.isol ? 'изоляция ' + p.isol + '. Препарирование' : 'препарирование') + ' кариозной полости, некрэктомия. Медикаментозная обработка раствором хлоргексидина 0,05%. ' +
-            linerText(p.liner) + 'Адгезивная подготовка: ' + p.adhesive + '. Восстановление ' + p.material + ' послойно. Финишная обработка, шлифовка, полировка. Окклюзия проверена.',
-          recommendations: 'Не принимать пищу 2 часа. Индивидуальная гигиена полости рта 2 раза в день, использование флосса. Контрольный осмотр через 6 месяцев.',
+          treatment: T.Nom + ': ' + tx.charAt(0).toLowerCase() + tx.slice(1),
+          recommendations: (p.tempOn ? 'Бережно относиться к временной пломбе, не жевать на стороне лечения. Явка для постоянной реставрации по записи. '
+            : 'Не принимать пищу 2 часа. ') + 'Индивидуальная гигиена полости рта 2 раза в день, использование флосса. Контрольный осмотр через 6 месяцев.',
         };
+      },
+    },
+
+    {
+      id: 'prevent', title: 'Герметизация / ICON / фторирование', icon: '🛡️', position: 'therapist', order: 18, teethOptional: true,
+      params: [
+        { key: 'method', label: 'Метод', type: 'seg', options: [opt('seal', 'Герметизация фиссур'), opt('icon', 'ICON'), opt('fluor', 'Глубокое фторирование')], default: 'seal' },
+        { key: 'diag', label: 'Диагноз', type: 'select', options: [
+          opt('', 'По методу'),
+          opt('K02.0', 'Кариес эмали, стадия пятна (K02.0)', { mkb: ['K02.0', 'K02.0 Кариес эмали'], name: 'Кариес эмали (стадия пятна)' }),
+          opt('K03.8', 'Гиперестезия твёрдых тканей (K03.8)', { mkb: ['K03.8', 'K03.8 Другие уточненные болезни твердых тканей зубов'], name: 'Гиперестезия твёрдых тканей зубов' }),
+        ], default: '' },
+      ],
+      check: (b) => (b.params.method !== 'fluor' && !b.teeth.length ? [{ lvl: 'bad', text: 'Герметизация / ICON: выберите зубы' }] : []),
+      mkb: (p, P) => (p.diag ? P.diag : p.method === 'fluor' ? { mkb: ['K03.8', 'K03.8 Другие уточненные болезни твердых тканей зубов'] } : { mkb: ['K02.0', 'K02.0 Кариес эмали'] }).mkb,
+      fields: (p, T, P) => {
+        const D = p.diag ? P.diag : p.method === 'fluor' ? { mkb: ['K03.8'], name: 'Гиперестезия твёрдых тканей зубов' } : { mkb: ['K02.0'], name: 'Кариес эмали (стадия пятна)' };
+        const at = T.has ? ' ' + T.gen : '';
+        const R = { diagnosis: D.name + at + ', ' + D.mkb[0] + '.' };
+        if (p.method === 'seal') {
+          R.complaints = 'Жалоб нет. Обратился с целью профилактики кариеса.';
+          R.statusLocalis = 'Фиссуры' + at + ' глубокие, узкие, пигментированные, эмаль без кариозных дефектов. Зондирование безболезненно.';
+          R.treatment = 'Герметизация фиссур' + at + ': очищение фиссур, изоляция, протравливание, нанесение и светоотверждение герметика. Окклюзия проверена.';
+          R.recommendations = 'Не принимать пищу 1 час. Индивидуальная гигиена полости рта 2 раза в день. Контрольный осмотр через 6 месяцев.';
+        } else if (p.method === 'icon') {
+          R.complaints = 'Жалобы на наличие белых пятен на зубах (эстетический дефект).';
+          R.statusLocalis = 'На поверхности' + at + ' меловидные пятна в пределах эмали, поверхность гладкая, зондирование безболезненно, реакция на холод отсутствует.';
+          R.treatment = 'Лечение начального кариеса' + at + ' методом инфильтрации (ICON): изоляция, протравливание, высушивание, нанесение инфильтранта, светоотверждение, полирование.';
+          R.recommendations = 'Не принимать окрашивающие продукты в течение суток. Индивидуальная гигиена полости рта 2 раза в день. Контрольный осмотр через 6 месяцев.';
+        } else {
+          R.complaints = 'Жалобы на повышенную чувствительность зубов от холодного, кислого и сладкого.';
+          R.statusLocalis = 'Эмаль' + at + ' без кариозных дефектов. Зондирование пришеечной области чувствительно, реакция на холод кратковременная.';
+          R.treatment = 'Глубокое фторирование эмали' + at + ': очищение поверхности зубов, изоляция, высушивание, нанесение фторсодержащего препарата.';
+          R.recommendations = 'Не принимать пищу и не полоскать рот 1 час. Использовать зубную пасту для чувствительных зубов.';
+        }
+        return R;
       },
     },
 
@@ -242,37 +318,45 @@
         ], default: 'chronic_p' },
         { key: 'stages', label: 'Этапы', type: 'chips', options: [
           opt('wall', 'Восст. стенки'), opt('pulpotomy', 'Пульпотомия'), opt('extirp', 'Экстирпация'), opt('retreat', 'Распломбировка'),
-          opt('shaping', 'Обработка каналов'), opt('tempfill', 'Врем. пломбир. каналов'), opt('obtur', 'Пломбирование каналов'), opt('temp', 'Временная пломба'),
+          opt('shaping', 'Обработка каналов'), opt('tempfill', 'Врем. пломбир. каналов'), opt('obtur', 'Пломбирование каналов'),
         ], default: [] },
         { key: 'canals', label: 'Каналы', type: 'chips', options: ['К', 'Щ', 'Н', 'В', 'Я', 'МЩ', 'МЩ2', 'МЯ', 'ДЩ', 'ДЯ', 'Д'].map((x) => opt(x)), default: [] },
-        { key: 'wl', label: 'Рабочие длины', type: 'text', placeholder: 'необязательно, напр.: МЩ 20, МЯ 20,5, Д 21', show: (p) => (p.stages || []).some((x) => x === 'shaping' || x === 'obtur') },
+        { key: 'wl', label: 'Рабочие длины', type: 'text', placeholder: 'необязательно, напр.: МЩ 20, МЯ 20,5, Д 21', show: (p) => (p.stages || []).some((x) => x === 'shaping' || x === 'obtur'), adv: true },
         { key: 'isol', label: 'Изоляция', type: 'select', options: [opt('', 'Нет'), opt('коффердамом', 'Коффердам'), opt('ретрактором OptraGate', 'OptraGate'), opt('ватными валиками и слюноотсосом', 'Ватные валики')], default: '' },
+        { key: 'prev', label: 'Ранее', type: 'seg', options: [opt('no', 'Не лечен'), opt('old', 'Старая пломба'), opt('crown', 'Иск. коронка')], default: 'no', show: (p) => p.visit === 'first' },
         { key: 'retreatMat', label: 'Ранее пломбированы', type: 'seg', options: [
           opt('paste', 'Паста', { t: 'пастой' }), opt('gutta', 'Гуттаперча', { t: 'гуттаперчей' }), opt('resorcin', 'Резорцин-формалин / фосфат-цемент', { t: 'резорцин-формалиновым методом (фосфат-цементом)' }),
         ], default: 'paste', show: (p) => (p.stages || []).includes('retreat') },
         { key: 'instr', label: 'Инструменты', type: 'select', options: [
           opt('rotary', 'Ротационные NiTi', { t: 'ротационными NiTi-инструментами' }), opt('recip', 'Реципрокные NiTi', { t: 'реципрокными NiTi-инструментами' }), opt('hand', 'Ручные К-файлы', { t: 'ручными К-файлами' }),
-        ], default: 'rotary', show: (p) => (p.stages || []).includes('shaping') },
-        { key: 'hard', label: 'Труднопроходимые', type: 'toggle', default: false, show: (p) => (p.stages || []).includes('shaping') },
+        ], default: 'rotary', show: (p) => (p.stages || []).includes('shaping'), adv: true },
+        { key: 'hard', label: 'Труднопроходимые', type: 'toggle', default: false, show: (p) => (p.stages || []).includes('shaping'), adv: true },
         { key: 'irrig', label: 'Ирригация', type: 'select', options: [
           opt('naocl', 'Гипохлорит натрия 3%', { t: 'раствором гипохлорита натрия 3%' }),
           opt('naocl_edta', 'Гипохлорит + ЭДТА 17%', { t: 'растворами гипохлорита натрия 3% и ЭДТА 17%' }),
           opt('naocl_edta_chx', 'Гипохлорит + ЭДТА + хлоргексидин', { t: 'растворами гипохлорита натрия 3%, ЭДТА 17%, финальная ирригация хлоргексидином 2%' }),
           opt('chx', 'Хлоргексидин 2%', { t: 'раствором хлоргексидина 2%' }),
-        ], default: 'naocl', show: (p) => (p.stages || []).includes('shaping') },
-        { key: 'us', label: 'УЗ-активация', type: 'toggle', default: true, show: (p) => (p.stages || []).includes('shaping') },
-        { key: 'caoh', label: 'Препарат в каналы', type: 'select', options: [opt('пастой на основе гидроксида кальция', 'Гидроксид кальция'), opt('пастой на основе гидроксида кальция с йодоформом', 'Гидроксид кальция + йодоформ')], show: (p) => (p.stages || []).includes('tempfill') },
+        ], default: 'naocl', show: (p) => (p.stages || []).includes('shaping'), adv: true },
+        { key: 'us', label: 'УЗ-активация', type: 'toggle', default: true, show: (p) => (p.stages || []).includes('shaping'), adv: true },
+        { key: 'caoh', label: 'Препарат в каналы', type: 'select', options: [opt('пастой на основе гидроксида кальция', 'Гидроксид кальция'), opt('пастой на основе гидроксида кальция с йодоформом', 'Гидроксид кальция + йодоформ')], show: (p) => (p.stages || []).includes('tempfill'), adv: true },
         { key: 'method', label: 'Метод', type: 'seg', options: [
           opt('lateral', 'Латеральная', { t: 'латеральной конденсации' }), opt('vertical', 'Вертикальная', { t: 'горячей вертикальной конденсации' }), opt('single', 'Одиночный штифт', { t: 'одиночного штифта' }),
-        ], default: 'lateral', show: (p) => (p.stages || []).includes('obtur') },
+        ], default: 'lateral', show: (p) => (p.stages || []).includes('obtur'), adv: true },
         { key: 'sealer', label: 'Силер', type: 'seg', options: [
           opt('epoxy', 'Эпоксидный', { t: 'эпоксидным силером' }), opt('bio', 'Биокерамический', { t: 'биокерамическим силером' }), opt('zoe', 'Цинкоксидэвгенольный', { t: 'цинкоксидэвгенольным силером' }),
-        ], default: 'epoxy', show: (p) => (p.stages || []).includes('obtur') },
-        { key: 'ctrl', label: 'Контрольный снимок', type: 'toggle', default: false, show: (p) => (p.stages || []).includes('obtur') },
-        { key: 'perc', label: 'Перкуссия', type: 'seg', options: [opt('', 'По диагнозу'), opt('безболезненна', 'Безбол.'), opt('слабоболезненна', 'Слабобол.'), opt('резко болезненна', 'Резко бол.')], default: '' },
-        { key: 'xray', label: 'Рентген', type: 'toggle', default: true, show: (p) => p.visit === 'first' },
-        { key: 'follow', label: 'Повторная явка', type: 'toggle', default: false },
-        { key: 'days', label: 'Явка через', type: 'seg', options: [opt('3–5 дней'), opt('7 дней'), opt('14 дней')], default: '7 дней', show: (p) => p.follow },
+        ], default: 'epoxy', show: (p) => (p.stages || []).includes('obtur'), adv: true },
+        { key: 'ctrl', label: 'Контрольный снимок', type: 'toggle', default: false, show: (p) => (p.stages || []).includes('obtur'), adv: true },
+        { key: 'finish', label: 'Завершение', type: 'seg', options: [opt('temp', 'Временная пломба'), opt('perm', 'Постоянная реставрация'), opt('none', 'Без пломбы')], default: 'temp' },
+        { key: 'material', label: 'Материал', type: 'select', options: MATERIALS, show: (p) => p.finish === 'perm' },
+        { key: 'post', label: 'Штифт', type: 'seg', options: [opt('', 'Нет'), opt('fiber', 'Стекловолоконный'), opt('metal', 'Анкерный металлический')], default: '', show: (p) => p.finish === 'perm', adv: true },
+        { key: 'postCanal', label: 'Штифт в канал', type: 'text', placeholder: 'необязательно, напр.: Н', show: (p) => p.finish === 'perm' && !!p.post, adv: true },
+        { key: 'liner', label: 'Прокладка', type: 'chips', options: LINER_OPTS, default: [], show: (p) => p.finish === 'perm', adv: true },
+        { key: 'adhesive', label: 'Адгезив', type: 'select', options: ADHESIVES, show: (p) => p.finish === 'perm', adv: true },
+        { key: 'grind', label: 'Сошлифовывание', type: 'toggle', default: false, adv: true },
+        { key: 'perc', label: 'Перкуссия', type: 'seg', options: [opt('', 'По диагнозу'), opt('безболезненна', 'Безбол.'), opt('слабоболезненна', 'Слабобол.'), opt('резко болезненна', 'Резко бол.')], default: '', adv: true },
+        { key: 'xray', label: 'Рентген', type: 'toggle', default: true, show: (p) => p.visit === 'first', adv: true },
+        { key: 'follow', label: 'Повторная явка', type: 'toggle', default: false, adv: true },
+        { key: 'days', label: 'Явка через', type: 'seg', options: [opt('3–5 дней'), opt('7 дней'), opt('14 дней')], default: '7 дней', show: (p) => p.follow, adv: true },
       ],
       onTeeth: (b) => { if (!b.touched.canals) b.params.canals = b.teeth.length ? canalsForTooth(b.teeth[0]) : []; },
       finalize: (b, blocks) => {
@@ -280,8 +364,8 @@
         if (st.some((x) => ['pulpotomy', 'extirp', 'retreat'].includes(x))) b.params.visit = 'first';
         else if (st.includes('obtur')) { b.params.visit = 'repeat'; b.auto.visit = 1; }
         if (st.includes('retreat')) { b.params.diag = 'chronic_ap'; b.auto.diag = 1; }
-        const restored = blocks.some((r) => r.tpl === 'endoRestore' && overlap(r, b));
-        if (st.includes('tempfill') && !restored && !st.includes('temp')) { b.params.stages = st.concat('temp'); b.auto.stages = 1; }
+        if (b.hints.filled) { b.params.finish = 'perm'; b.auto.finish = 1; }
+        else if (st.includes('tempfill') && !b.auto.finish) { b.params.finish = 'temp'; b.auto.finish = 1; }
       },
       check: (b) => {
         const out = [], n = b.hints.count, c = (b.params.canals || []).length;
@@ -293,7 +377,7 @@
       fields: (p, T, P, X) => {
         const st = p.stages || [], has = (k) => st.includes(k), C = canalsGen(p.canals), D = P.diag;
         const first = p.visit === 'first', retreat = has('retreat');
-        const restored = X.blocks.some((r) => r.tpl === 'endoRestore' && overlap(r, X.b));
+        const restored = p.finish === 'perm';
         const perc = p.perc || D.perc;
         const R = { diagnosis: D.name + ' ' + T.gen + ', ' + D.mkb[0] + '.' };
         if (first) {
@@ -309,7 +393,8 @@
             acute_ap: 'Со слов пациента, боль появилась несколько дней назад и постепенно усиливается.',
             chronic_ap: 'Со слов пациента, ' + T.nom + ' периодически беспокоит длительное время.',
           }[p.diag] + (retreat ? ' Ранее ' + T.nom + ' лечен(ы) эндодонтически.' : '');
-          const cav = retreat ? 'На ' + T.loc + ' пломба с нарушением краевого прилегания.'
+          const cav = p.prev === 'crown' ? 'На ' + T.loc + ' искусственная коронка.'
+            : retreat || p.prev === 'old' ? 'На ' + T.loc + ' пломба с нарушением краевого прилегания.'
             : p.diag === 'acute_p' ? 'На ' + T.loc + ' глубокая кариозная полость, выполненная размягчённым дентином.'
             : 'На ' + T.loc + ' глубокая кариозная полость, сообщающаяся с полостью зуба.';
           const probe = { acute_p: 'Зондирование дна резко болезненно в одной точке. Реакция на холод резко болезненная, длительная.',
@@ -317,7 +402,7 @@
             acute_ap: 'Зондирование безболезненно. Реакция на холод отсутствует.', chronic_ap: 'Зондирование безболезненно. Реакция на холод отсутствует.' }[p.diag];
           const muc = p.diag === 'acute_ap' ? 'Слизистая оболочка в проекции верхушки корня гиперемирована, отёчна, пальпация болезненна.'
             : 'Слизистая оболочка в области ' + T.gen + ' без патологических изменений.';
-          R.statusLocalis = [cav, retreat ? 'Реакция на холод отсутствует.' : probe, 'Перкуссия ' + perc + '.', muc].join(' ');
+          R.statusLocalis = [cav, p.prev === 'crown' ? '' : retreat ? 'Реакция на холод отсутствует.' : probe, 'Перкуссия ' + perc + '.', muc].filter(Boolean).join(' ');
           if (p.xray) {
             const peri = { acute_p: 'периапикальные ткани без патологических изменений', chronic_p: 'периапикальные ткани без патологических изменений',
               acute_ap: 'расширение периодонтальной щели в области верхушки корня', chronic_ap: 'очаг деструкции костной ткани в области верхушки корня' }[p.diag];
@@ -331,8 +416,10 @@
         }
         const t = [];
         if (!first) t.push('Снятие временной пломбы, удаление временного пломбировочного материала из корневых каналов.');
-        else if (retreat) t.push('Удаление старой пломбы, раскрытие полости зуба.');
+        else if (p.prev === 'crown') t.push('Трепанация искусственной коронки, раскрытие полости зуба.');
+        else if (retreat || p.prev === 'old') t.push('Удаление старой пломбы, раскрытие полости зуба.');
         else t.push('Препарирование кариозной полости, некрэктомия, раскрытие полости зуба.');
+        if (p.grind) t.push('Сошлифовывание острых краёв эмали.');
         if (has('wall')) t.push('Восстановление стенки ' + T.gen + ' для создания условий эндодонтического лечения.');
         if (p.isol) t.push('Изоляция ' + p.isol + '.');
         if (has('pulpotomy')) t.push('Ампутация коронковой пульпы.');
@@ -345,34 +432,24 @@
         if (has('tempfill')) t.push('Временное пломбирование ' + C + ' ' + p.caoh + '.');
         if (has('obtur')) t.push('Пломбирование ' + C + ' гуттаперчевыми штифтами методом ' + P.method.t + ' с ' + P.sealer.t + '.');
         if (has('obtur') && p.ctrl) t.push('Контрольная рентгенограмма: каналы запломбированы до физиологической верхушки, гомогенно.');
-        if (has('temp')) t.push('Наложение временной пломбы.');
+        if (p.finish === 'temp') t.push('Наложение временной пломбы.');
+        if (p.finish === 'perm') t.push('Восстановление коронковой части зуба: ' +
+          (p.post ? 'установка ' + (p.post === 'fiber' ? 'стекловолоконного' : 'металлического анкерного') + ' штифта' + (p.postCanal ? ' в канал ' + p.postCanal : '') + (p.post === 'fiber' ? ' на композитный цемент' : '') + '. ' : '') +
+          (linerText(p.liner) ? linerText(p.liner).charAt(0).toLowerCase() + linerText(p.liner).slice(1) : '') +
+          (p.post || linerText(p.liner) ? 'Адгезивная' : 'адгезивная') + ' подготовка: ' + p.adhesive + '. Реставрация ' + p.material + ' послойно. Финишная обработка, шлифовка, полировка. Окклюзия проверена.');
         const tx = t.join(' ');
         R.treatment = T.Nom + ': ' + tx.charAt(0).toLowerCase() + tx.slice(1);
         const r = ['Не принимать пищу 2 часа.'];
-        if (has('temp')) r.push('Бережно относиться к временной пломбе, не жевать на стороне лечения.');
+        if (p.finish === 'temp') r.push('Бережно относиться к временной пломбе, не жевать на стороне лечения.');
         if (has('obtur')) r.push('Возможна болезненность при накусывании в течение нескольких дней.');
-        if (has('obtur') && !restored) r.push('Восстановление коронковой части ' + T.gen + ' в ближайшее время.');
+        if (has('obtur') && p.finish === 'temp') r.push('Восстановление коронковой части ' + T.gen + ' в ближайшее время.');
+        if (p.finish === 'none') r.push('Рекомендовано ортопедическое лечение (восстановление ' + T.gen + ' коронкой).');
+        if (restored) r.push('Контрольный осмотр и рентгенограмма через 6 месяцев.');
         if (p.follow) r.push('Явка через ' + p.days + '.');
         r.push('При появлении боли или отёка — обратиться в клинику.');
         R.recommendations = r.join(' ');
         return R;
       },
-    },
-
-    {
-      id: 'endoRestore', title: 'Реставрация после эндо', icon: '🧱', position: 'therapist', order: 26, needTeeth: true,
-      params: [
-        { key: 'post', label: 'Стекловолоконный штифт', type: 'toggle', default: false },
-        { key: 'postCanal', label: 'Штифт в канал', type: 'text', placeholder: 'например: Н', show: (p) => p.post },
-        { key: 'liner', label: 'Прокладка', type: 'chips', options: LINER_OPTS, default: [] },
-        { key: 'adhesive', label: 'Адгезив', type: 'select', options: ADHESIVES },
-        { key: 'material', label: 'Материал', type: 'select', options: MATERIALS },
-      ],
-      fields: (p, T) => ({
-        treatment: 'Восстановление коронковой части ' + T.gen + '. ' + (p.post ? 'Установка стекловолоконного штифта' + (p.postCanal ? ' в канал ' + p.postCanal : '') + ' на композитный цемент. ' : '') +
-          linerText(p.liner) + 'Адгезивная подготовка: ' + p.adhesive + '. Реставрация ' + p.material + ' послойно. Финишная обработка, шлифовка, полировка. Окклюзия проверена.',
-        recommendations: 'Контрольный осмотр и рентгенограмма через 6 месяцев.',
-      }),
     },
 
     {

@@ -109,20 +109,24 @@
     services.forEach((s) => {
       if (POSITION_BY_CODE.some(([c]) => s.code.startsWith(c))) return;
       const rule = ruleFor(s);
-      if (rule && rule.mod) { mods.push({ rule, s }); return; }
-      if (rule && rule.block && rule.block.merge) {
+      if (rule && rule.info) return;
+      if (rule && rule.unmatched) { unmatched.push(s); return; }
+      if (rule && rule.mod) { mods.push({ rule, s }); if (!rule.pass) return; }
+      if (rule && rule.block && rule.block.merge && !rule.pass) {
         const rb = rule.block;
         if (rb.qtyIsTeeth) s.qtyIsTeeth = true;
-        let b = rb.mergeAll ? blocks.find((x) => x.tpl === rb.tpl) : blocks.find((x) => x.tpl === rb.tpl && x.teeth.join() === s.teeth.join());
-        if (b && rb.mergeAll) s.teeth.forEach((t) => { if (!b.teeth.includes(t)) b.teeth = b.teeth.concat(t).sort(); });
-        if (!b && !s.teeth.length) { const c = blocks.filter((x) => x.tpl === rb.tpl); if (c.length === 1) b = c[0]; }
+        let b = rb.mergeAll ? blocks.find((x) => x.tpl === rb.tpl)
+          : rb.mergeBy ? blocks.find((x) => x.tpl === rb.tpl && x.params[rb.mergeBy] === rb.params[rb.mergeBy])
+          : blocks.find((x) => x.tpl === rb.tpl && x.teeth.join() === s.teeth.join());
+        if (b && (rb.mergeAll || rb.mergeBy)) s.teeth.forEach((t) => { if (!b.teeth.includes(t)) b.teeth = b.teeth.concat(t).sort(); });
+        if (!b && !s.teeth.length && !rb.mergeBy) { const c = blocks.filter((x) => x.tpl === rb.tpl); if (c.length === 1) b = c[0]; }
         if (!b) { b = newBlock(rb.tpl, s.teeth, 'service'); blocks.push(b); }
         Object.keys(rb.params || {}).forEach((k) => setParam(b, k, rb.params[k]));
         if (rb.hint) rb.hint(b, s);
         noTeethHint(b, s);
         return;
       }
-      if (rule && rule.block) {
+      if (rule && rule.block && !rule.pass) {
         const rb = rule.block;
         const same = blocks.find((b) => b.rule === rule && b.teeth.join() === s.teeth.join());
         if (same) { same.params.qty = (+same.params.qty || 0) + s.qty; return; }
@@ -134,20 +138,27 @@
       const tpl = TEMPLATES.find((t) => (t.triggers || []).some((c) => s.code.startsWith(c)));
       if (!tpl) { unmatched.push(s); return; }
       const same = blocks.find((b) => b.tpl === tpl.id && b.src === 'service' && b.teeth.join() === s.teeth.join());
-      if (same) { if (same.params.qty != null) same.params.qty = (+same.params.qty || 0) + s.qty; noTeethHint(same, s); return; }
-      const b = newBlock(tpl.id, s.teeth, 'service'); if (b.params.qty != null) b.params.qty = s.qty; noTeethHint(b, s); blocks.push(b);
+      if (same) { if (same.params.qty != null) same.params.qty = (+same.params.qty || 0) + s.qty; noTeethHint(same, s); (same.svc = same.svc || []).push(s); return; }
+      const b = newBlock(tpl.id, s.teeth, 'service'); if (b.params.qty != null) b.params.qty = s.qty; noTeethHint(b, s); b.svc = [s]; blocks.push(b);
     });
-    // пломба на зубе с эндолечением → блок «Реставрация после эндолечения»
+    // пломба на зубе с эндолечением → постоянная реставрация внутри блока «Эндодонтия»
     blocks.slice().forEach((b) => {
-      if (b.tpl !== 'caries' || !tplById('endoRestore')) return;
-      if (blocks.some((e) => e.tpl === 'endo' && e.teeth.some((t) => b.teeth.includes(t)))) {
-        const r = newBlock('endoRestore', b.teeth, 'service'); blocks.splice(blocks.indexOf(b), 1, r);
-      }
+      if (b.tpl !== 'caries' || b.src !== 'service') return;
+      const endos = blocks.filter((e) => e.tpl === 'endo');
+      let e = endos.find((x) => x.teeth.some((t) => b.teeth.includes(t)));
+      if (!e && endos.length === 1 && (!b.teeth.length || !endos[0].teeth.length)) e = endos[0];
+      if (!e) return;
+      if (!e.teeth.length && b.teeth.length) { e.teeth = b.teeth.slice(); const t = tplById('endo'); if (t.onTeeth) t.onTeeth(e); }
+      e.hints.filled = true;
+      (b.svc || []).forEach((s) => { s.badge = 'Эндо: постоянная реставрация'; });
+      blocks.splice(blocks.indexOf(b), 1);
     });
     // модификаторы: на блоки того же шаблона (с общими зубами, если зубы у услуги указаны)
     mods.forEach(({ rule, s }) => {
       const m = rule.mod;
       blocks.filter((b) => tplMatch(m.tpl, b.tpl) && (!s.teeth.length || b.teeth.some((t) => s.teeth.includes(t)))).forEach((b) => {
+        const keys = (tplById(b.tpl).params || []).map((x) => x.key);
+        if (m.set) { Object.keys(m.set).forEach((k) => { if (keys.includes(k)) { b.params[k] = m.set[k]; b.auto[k] = 1; } }); return; }
         if (m.add) { const a = b.params[m.key] || []; if (!a.includes(m.add)) b.params[m.key] = a.concat(m.add); } else b.params[m.key] = m.value;
         b.auto[m.key] = 1;
       });
@@ -403,7 +414,19 @@
   .badge{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:20px;white-space:nowrap}
   .ok{background:#dcfce7;color:#166534} .warn{background:#fef3c7;color:#92400e} .bad{background:#fee2e2;color:#991b1b}
   .dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:7px}
+  .tile{position:relative;display:flex;align-items:center;gap:8px;text-align:left;border:1.5px solid #e2e8f0;background:#fff;border-radius:12px;padding:9px 10px;cursor:pointer;transition:all .12s;color:#334155}
+  .tile:hover{border-color:#818cf8;transform:translateY(-1px)}
+  .tile.on{background:linear-gradient(135deg,rgba(14,165,163,.10),rgba(99,102,241,.14));border-color:#818cf8;color:#312e81}
+  .ti-ic{font-size:18px} .ti-t{flex:1;font-size:12.5px;font-weight:700;line-height:1.2}
+  .ti-n{font-size:11px;font-weight:800;color:#fff;background:linear-gradient(135deg,#0ea5a3,#6366f1);border-radius:20px;padding:1px 7px}
+  .ti-p{font-size:15px;color:#94a3b8;font-weight:700}
+  .ti-s{position:absolute;bottom:-7px;right:8px;font-size:9.5px;font-weight:700;background:#fff;border:1px solid #c7d2fe;color:#4338ca;border-radius:10px;padding:0 6px}
+  .tsel{flex:1;width:auto;font-weight:700;font-size:14px;border:1.5px solid transparent;background:#f8fafc;padding:5px 8px;border-radius:9px;cursor:pointer}
+  .tsel:hover{border-color:#c7d2fe}
   .add{display:flex;flex-wrap:wrap;gap:6px}
+  .morebtn{display:block;width:100%;margin-top:6px;border:1px dashed #cbd5e1;background:#f8fafc;color:#475569;border-radius:10px;padding:7px;font-size:12.5px;font-weight:600;cursor:pointer}
+  .morebtn:hover{background:#eef2ff;color:#4338ca;border-color:#a5b4fc}
   .addb{border:1px dashed #a5b4fc;background:#fff;color:#4338ca;border-radius:10px;padding:7px 11px;font-size:12.5px;font-weight:600;cursor:pointer}
   .addb:hover{background:#eef2ff}
   .tabs{display:flex;gap:4px;background:#e2e8f0;padding:3px;border-radius:12px;margin-bottom:10px}
@@ -453,6 +476,7 @@
   function renderParam(b, pr) {
     const tpl = tplById(b.tpl); const v = b.params[pr.key]; const id = 'b' + b.uid + '.' + pr.key;
     if (pr.show && !pr.show(b.params)) return '';
+    if (pr.adv && !b.showAdv && !b.auto[pr.key] && !b.touched[pr.key]) return '';
     let ctl = '';
     if (pr.type === 'select') ctl = '<select data-p="' + id + '">' + pr.options.map((o) => '<option value="' + esc(o.v) + '"' + (o.v === v ? ' selected' : '') + '>' + esc(o.l) + '</option>').join('') + '</select>';
     else if (pr.type === 'seg') ctl = '<div class="seg">' + pr.options.map((o) => '<button data-seg="' + id + '" data-v="' + esc(o.v) + '" class="' + (o.v === v ? 'on' : '') + '">' + esc(o.l) + '</button>').join('') + '</div>';
@@ -465,6 +489,13 @@
   }
 
   function hasFormula(tpl) { return tpl.needTeeth || tpl.teethFromOthers || tpl.teethOptional; }
+
+  function advLink(b) {
+    const t = tplById(b.tpl);
+    const hidden = (t.params || []).filter((pr) => pr.adv && (!pr.show || pr.show(b.params)) && !b.auto[pr.key] && !b.touched[pr.key]).length;
+    if (!hidden && !b.showAdv) return '';
+    return '<button class="morebtn" data-adv="' + b.uid + '">' + (b.showAdv ? '▴ Скрыть дополнительные' : '▾ Ещё параметры (' + hidden + ')') + '</button>';
+  }
 
   function renderTeeth(b) {
     const tpl = tplById(b.tpl);
@@ -506,28 +537,41 @@
       P.innerHTML = h; bind(P); return;
     }
 
+    // Шаблоны: что выбрано и быстрый выбор
+    const userBlocks = S.blocks.filter((b) => !tplById(b.tpl).fixed);
+    h += '<div class="sec"><h2>Шаблоны</h2><div class="card">' +
+      (userBlocks.length ? '' : '<div class="hint" style="margin:0 0 8px">Шаблон не выбран — услуги не распознаны или их ещё нет. Выберите вручную:</div>') +
+      '<div class="tiles">' + TEMPLATES.filter((t) => !t.fixed).map((t) => {
+        const bs = userBlocks.filter((b) => b.tpl === t.id), n = bs.length, auto = bs.some((b) => b.src === 'service');
+        return '<button class="tile' + (n ? ' on' : '') + '" data-add="' + t.id + '" title="Добавить блок «' + esc(t.title) + '»">' +
+          '<span class="ti-ic">' + t.icon + '</span><span class="ti-t">' + esc(t.title) + '</span>' +
+          (n ? '<span class="ti-n">' + (n > 1 ? '×' + n : '✓') + '</span>' : '<span class="ti-p">＋</span>') +
+          (n ? '<span class="ti-s">' + (auto ? 'из услуг' : 'вручную') + '</span>' : '') + '</button>';
+      }).join('') + '</div><div class="hint" style="margin-top:6px">Нажмите, чтобы добавить блок. Сменить шаблон блока — в его заголовке, удалить — ×.</div></div></div>';
+
     // Услуги визита
     h += '<div class="sec"><h2>Услуги визита</h2><div class="card">' + (S.services.length ? S.services.map((s) => {
       const isRec = POSITION_BY_CODE.some(([c]) => s.code.startsWith(c));
       const rule = ruleFor(s);
       if (rule) return '<div class="svc"><span class="cd">' + esc(s.code) + '</span><span class="nm">' + esc(s.name.replace(/^\S+\s/, '')) +
-        (s.teeth.length ? ' ' + s.teeth.map((t) => '<span class="tchip">' + fmtTooth(t) + '</span>').join(' ') : '') + '</span>' + badge('ok', rule.label) + '</div>';
+        (s.teeth.length ? ' ' + s.teeth.map((t) => '<span class="tchip">' + fmtTooth(t) + '</span>').join(' ') : '') + '</span>' + badge(rule.unmatched ? 'warn' : 'ok', rule.unmatched ? rule.label + ': нет шаблона' : rule.label) + '</div>';
       const tpl = TEMPLATES.find((t) => (t.triggers || []).some((c) => s.code.startsWith(c)));
       return '<div class="svc"><span class="cd">' + esc(s.code) + '</span><span class="nm">' + esc(s.name.replace(/^\S+\s/, '')) +
         (s.teeth.length ? ' ' + s.teeth.map((t) => '<span class="tchip">' + fmtTooth(t) + '</span>').join(' ') : '') + '</span>' +
-        (isRec ? badge('ok', 'приём') : tpl ? badge('ok', (tpl.id === 'caries' && S.blocks.some((b) => b.tpl === 'endoRestore' && b.teeth.some((t) => s.teeth.includes(t)))) ? 'Реставрация после эндо' : tpl.title) : badge('warn', 'нет шаблона')) + '</div>';
+        (isRec ? badge('ok', 'приём') : s.badge ? badge('ok', s.badge) : tpl ? badge('ok', tpl.title) : badge('warn', 'нет шаблона')) + '</div>';
     }).join('') : '<div class="hint">Услуги не найдены</div>') + '</div></div>';
 
     // Блоки
     h += '<div class="sec"><h2>Блоки записи</h2>';
     S.blocks.forEach((b) => {
       const t = tplById(b.tpl);
-      h += '<div class="card"><div class="ch"><span class="em">' + t.icon + '</span><span class="ti">' + esc(t.title) + '</span>' +
+      h += '<div class="card"><div class="ch"><span class="em">' + t.icon + '</span>' + (t.fixed ? '<span class="ti">' + esc(t.title) + '</span>' :
+        '<select class="tsel" data-switch="' + b.uid + '">' + TEMPLATES.filter((x) => !x.fixed).map((x) => '<option value="' + x.id + '"' + (x.id === b.tpl ? ' selected' : '') + '>' + esc(x.title) + '</option>').join('') + '</select>') +
         (b.src === 'service' ? badge('ok', 'из услуг') : b.src === 'fixed' ? '' : badge('warn', 'добавлен вручную')) +
         (t.fixed ? '' : '<button class="del" data-del="' + b.uid + '" title="Удалить блок">×</button>') + '</div>' +
-        renderTeeth(b) + (t.params || []).map((pr) => renderParam(b, pr)).join('') + '</div>';
+        renderTeeth(b) + (t.params || []).map((pr) => renderParam(b, pr)).join('') + advLink(b) + '</div>';
     });
-    h += '<div class="add">' + TEMPLATES.filter((t) => !t.fixed).map((t) => '<button class="addb" data-add="' + t.id + '">＋ ' + t.icon + ' ' + esc(t.title) + '</button>').join('') + '</div></div>';
+    h += '</div>';
 
     // Протокол
     h += '<div class="sec"><h2>Протокол ЕГИСЗ</h2><div class="card">' +
@@ -589,18 +633,22 @@
     if (q('undo')) q('undo').onclick = doUndo;
     if (q('dur')) q('dur').onchange = (e) => { S.duration = Math.max(5, +e.target.value || DEFAULT_DURATION); render(); };
     on('[data-p]', 'change', (e) => { const { b, key } = findBlock(e.target.dataset.p); const pr = tplById(b.tpl).params.find((x) => x.key === key);
-      b.params[key] = pr.type === 'number' ? (+e.target.value || pr.default) : e.target.value; delete b.auto[key]; render(); });
-    on('[data-seg]', 'click', (e) => { const { b, key } = findBlock(e.currentTarget.dataset.seg); b.params[key] = e.currentTarget.dataset.v; delete b.auto[key]; render(); });
+      b.params[key] = pr.type === 'number' ? (+e.target.value || pr.default) : e.target.value; delete b.auto[key]; b.touched[key] = 1; render(); });
+    on('[data-seg]', 'click', (e) => { const { b, key } = findBlock(e.currentTarget.dataset.seg); b.params[key] = e.currentTarget.dataset.v; delete b.auto[key]; b.touched[key] = 1; render(); });
     on('[data-chip]', 'click', (e) => { const { b, key } = findBlock(e.currentTarget.dataset.chip); const v = e.currentTarget.dataset.v; const a = b.params[key] || []; b.touched[key] = 1;
       b.params[key] = a.includes(v) ? a.filter((x) => x !== v) : a.concat(v); delete b.auto[key]; render(); });
-    on('[data-tg]', 'click', (e) => { const { b, key } = findBlock(e.currentTarget.dataset.tg); b.params[key] = !b.params[key]; delete b.auto[key]; render(); });
+    on('[data-tg]', 'click', (e) => { const { b, key } = findBlock(e.currentTarget.dataset.tg); b.params[key] = !b.params[key]; delete b.auto[key]; b.touched[key] = 1; render(); });
     on('[data-pick]', 'click', (e) => { const b = S.blocks.find((x) => x.uid === +e.currentTarget.dataset.pick); b.pickerOpen = !b.pickerOpen; render(); });
     on('[data-tooth]', 'click', (e) => { const b = S.blocks.find((x) => x.uid === +e.currentTarget.dataset.tooth); const t = e.currentTarget.dataset.t;
       b.teeth = b.teeth.includes(t) ? b.teeth.filter((x) => x !== t) : b.teeth.concat(t).sort(); if (tplById(b.tpl).onTeeth) tplById(b.tpl).onTeeth(b); render(); });
+    on('[data-adv]', 'click', (e) => { const b = S.blocks.find((x) => x.uid === +e.currentTarget.dataset.adv); b.showAdv = !b.showAdv; render(); });
     on('[data-milk]', 'click', () => { S.showMilk = !S.showMilk; render(); });
     on('[data-clear]', 'click', (e) => { const b = S.blocks.find((x) => x.uid === +e.currentTarget.dataset.clear); b.teeth = []; if (tplById(b.tpl).onTeeth) tplById(b.tpl).onTeeth(b); render(); });
     on('[data-del]', 'click', (e) => { S.blocks = S.blocks.filter((x) => x.uid !== +e.currentTarget.dataset.del); render(); });
-    on('[data-add]', 'click', (e) => { const b = newBlock(e.currentTarget.dataset.add, [], 'manual'); S.blocks.push(b); render(); });
+    on('[data-add]', 'click', (e) => { const b = newBlock(e.currentTarget.dataset.add, [], 'manual'); S.blocks.push(b); render();
+      const cards = P.querySelectorAll('.card'); const last = [...cards].find((c) => c.querySelector('[data-switch="' + b.uid + '"]')); if (last) last.scrollIntoView({ behavior: 'smooth', block: 'center' }); });
+    on('[data-switch]', 'change', (e) => { const i = S.blocks.findIndex((x) => x.uid === +e.target.dataset.switch); const old = S.blocks[i];
+      const nb = newBlock(e.target.value, old.teeth, 'manual'); S.blocks.splice(i, 1, nb); render(); });
     on('[data-pos]', 'click', (e) => { S.position = e.currentTarget.dataset.pos; S.posTouched = true; render(); });
     on('[data-mode]', 'click', (e) => { S.mode = e.currentTarget.dataset.mode; render(); });
     on('[data-tab]', 'click', (e) => { S.tab = e.currentTarget.dataset.tab; render(); });

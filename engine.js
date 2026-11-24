@@ -86,9 +86,22 @@
   }
   function newBlock(tplId, teeth, src) {
     const t = tplById(tplId);
-    return { uid: uid++, tpl: tplId, teeth: (teeth || []).slice(), params: defaultParams(t), src: src || 'manual', pickerOpen: false, auto: {}, sort: 0 };
+    const b = { uid: uid++, tpl: tplId, teeth: (teeth || []).slice(), params: defaultParams(t), src: src || 'manual', pickerOpen: false, auto: {}, touched: {}, hints: {}, sort: 0 };
+    if (t.onTeeth) t.onTeeth(b);
+    return b;
+  }
+  const tplMatch = (tpl, id) => (Array.isArray(tpl) ? tpl.includes(id) : tpl === id);
+  function setParam(b, key, val) {
+    if (Array.isArray(val)) { const a = b.params[key] || []; b.params[key] = a.concat(val.filter((v) => !a.includes(v))); }
+    else b.params[key] = val;
+    b.auto[key] = 1;
   }
 
+  function noTeethHint(b, s) {
+    if (s.teeth.length) return;
+    b.hints.noTeeth = true;
+    if (tplById(b.tpl).qtyIsTeeth || (b.rule && b.rule.block && b.rule.block.qtyIsTeeth) || s.qtyIsTeeth) b.hints.teethQty = (b.hints.teethQty || 0) + s.qty;
+  }
   function buildInitialState() {
     const services = getServices();
     const blocks = [newBlock('base', [], 'fixed')];
@@ -97,6 +110,18 @@
       if (POSITION_BY_CODE.some(([c]) => s.code.startsWith(c))) return;
       const rule = ruleFor(s);
       if (rule && rule.mod) { mods.push({ rule, s }); return; }
+      if (rule && rule.block && rule.block.merge) {
+        const rb = rule.block;
+        if (rb.qtyIsTeeth) s.qtyIsTeeth = true;
+        let b = rb.mergeAll ? blocks.find((x) => x.tpl === rb.tpl) : blocks.find((x) => x.tpl === rb.tpl && x.teeth.join() === s.teeth.join());
+        if (b && rb.mergeAll) s.teeth.forEach((t) => { if (!b.teeth.includes(t)) b.teeth = b.teeth.concat(t).sort(); });
+        if (!b && !s.teeth.length) { const c = blocks.filter((x) => x.tpl === rb.tpl); if (c.length === 1) b = c[0]; }
+        if (!b) { b = newBlock(rb.tpl, s.teeth, 'service'); blocks.push(b); }
+        Object.keys(rb.params || {}).forEach((k) => setParam(b, k, rb.params[k]));
+        if (rb.hint) rb.hint(b, s);
+        noTeethHint(b, s);
+        return;
+      }
       if (rule && rule.block) {
         const rb = rule.block;
         const same = blocks.find((b) => b.rule === rule && b.teeth.join() === s.teeth.join());
@@ -109,17 +134,25 @@
       const tpl = TEMPLATES.find((t) => (t.triggers || []).some((c) => s.code.startsWith(c)));
       if (!tpl) { unmatched.push(s); return; }
       const same = blocks.find((b) => b.tpl === tpl.id && b.src === 'service' && b.teeth.join() === s.teeth.join());
-      if (same) { if (same.params.qty != null) same.params.qty = (+same.params.qty || 0) + s.qty; return; }
-      const b = newBlock(tpl.id, s.teeth, 'service'); if (b.params.qty != null) b.params.qty = s.qty; blocks.push(b);
+      if (same) { if (same.params.qty != null) same.params.qty = (+same.params.qty || 0) + s.qty; noTeethHint(same, s); return; }
+      const b = newBlock(tpl.id, s.teeth, 'service'); if (b.params.qty != null) b.params.qty = s.qty; noTeethHint(b, s); blocks.push(b);
+    });
+    // пломба на зубе с эндолечением → блок «Реставрация после эндолечения»
+    blocks.slice().forEach((b) => {
+      if (b.tpl !== 'caries' || !tplById('endoRestore')) return;
+      if (blocks.some((e) => e.tpl === 'endo' && e.teeth.some((t) => b.teeth.includes(t)))) {
+        const r = newBlock('endoRestore', b.teeth, 'service'); blocks.splice(blocks.indexOf(b), 1, r);
+      }
     });
     // модификаторы: на блоки того же шаблона (с общими зубами, если зубы у услуги указаны)
     mods.forEach(({ rule, s }) => {
       const m = rule.mod;
-      blocks.filter((b) => b.tpl === m.tpl && (!s.teeth.length || b.teeth.some((t) => s.teeth.includes(t)))).forEach((b) => {
+      blocks.filter((b) => tplMatch(m.tpl, b.tpl) && (!s.teeth.length || b.teeth.some((t) => s.teeth.includes(t)))).forEach((b) => {
         if (m.add) { const a = b.params[m.key] || []; if (!a.includes(m.add)) b.params[m.key] = a.concat(m.add); } else b.params[m.key] = m.value;
         b.auto[m.key] = 1;
       });
     });
+    blocks.forEach((b) => { const t = tplById(b.tpl); if (t.finalize) t.finalize(b, blocks); });
     const recPos = services.map((s) => (POSITION_BY_CODE.find(([c]) => s.code.startsWith(c)) || [])[1]).find(Boolean) || null;
     S = { services, unmatched, blocks, recPos, position: null, posTouched: false, duration: LS.get('duration', DEFAULT_DURATION), mode: 'replace', edits: {}, tab: 'diary' };
   }
@@ -152,7 +185,7 @@
     const F = {}; const diags = [];
     order.forEach((b) => {
       const tpl = tplById(b.tpl), T = teethHelper(blockTeeth(b)), P = resolvedParams(tpl, b.params);
-      const out = tpl.fields(b.params, T, P) || {};
+      const out = tpl.fields(b.params, T, P, { b, blocks: S.blocks }) || {};
       Object.keys(out).forEach((k) => { if (out[k]) { F[k] = F[k] || []; if (!F[k].includes(out[k])) F[k].push(out[k]); } });
       if (tpl.mkb) { const m = tpl.mkb(b.params, P); if (m && !diags.some((x) => x[0] === m[0])) diags.push(m); }
     });
@@ -194,14 +227,15 @@
   function issues(ctx) {
     const list = [];
     if (!ctx) { list.push({ lvl: 'bad', text: 'Дневник приёма не создан или не открыт визит' }); return list; }
-    S.blocks.forEach((b) => { const t = tplById(b.tpl); if (t.needTeeth && !b.teeth.length) list.push({ lvl: 'bad', text: t.title + ': не выбран зуб' }); });
+    S.blocks.forEach((b) => { const t = tplById(b.tpl); if (t.needTeeth && !b.teeth.length) list.push({ lvl: 'bad', text: t.title + ': не выбран зуб' });
+      if (t.check) (t.check(b, S.blocks) || []).forEach((x) => list.push(x)); });
     const pi = positionInfo();
     if (!pi.key) list.push({ lvl: 'bad', text: 'Должность: ' + pi.note });
     else if (!POSITIONS[pi.key].id) list.push({ lvl: 'warn', text: POSITIONS[pi.key].name + ': код не подтверждён — должность выберите в протоколе вручную' });
     if (!ctx.d) list.push({ lvl: 'warn', text: 'Протокол ЕГИСЗ не найден — заполнится только дневник' });
     // зубы блоков vs зубы услуг
     const svcTeeth = new Set(S.services.flatMap((s) => s.teeth));
-    S.blocks.forEach((b) => { if (tplById(b.tpl).needTeeth && svcTeeth.size) b.teeth.forEach((t) => { if (!svcTeeth.has(t)) list.push({ lvl: 'warn', text: 'Зуб ' + fmtTooth(t) + ' не указан ни в одной услуге визита' }); }); });
+    S.blocks.forEach((b) => { if (tplById(b.tpl).needTeeth && svcTeeth.size && !b.hints.noTeeth) b.teeth.forEach((t) => { if (!svcTeeth.has(t)) list.push({ lvl: 'warn', text: 'Зуб ' + fmtTooth(t) + ' не указан ни в одной услуге визита' }); }); });
     S.unmatched.forEach((s) => list.push({ lvl: 'warn', text: 'Нет шаблона для услуги: ' + s.name.slice(0, 60) }));
     if (S.blocks.length === 1) list.push({ lvl: 'warn', text: 'Добавьте хотя бы один блок лечения' });
     return list;
@@ -351,11 +385,21 @@
   .teeth{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
   .tchip{background:#ecfeff;color:#0e7490;border:1px solid #a5f3fc;border-radius:8px;padding:3px 8px;font-size:12.5px;font-weight:700}
   .link{border:0;background:none;color:#4f46e5;font-weight:600;font-size:12.5px;cursor:pointer;padding:3px 4px}
-  .grid{margin-top:8px;padding:8px;background:#f8fafc;border-radius:12px;border:1px solid #e2e8f0}
-  .jaw{display:flex;justify-content:center;gap:10px;margin:3px 0} .q{display:flex;gap:3px}
-  .tb{width:28px;height:28px;border-radius:8px;border:1px solid #e2e8f0;background:#fff;font-size:11.5px;font-weight:700;color:#334155;cursor:pointer}
-  .tb:hover{border-color:#a5b4fc} .tb.on{background:#6366f1;border-color:#6366f1;color:#fff}
-  .tb.svc{box-shadow:inset 0 -3px 0 #22d3ee}
+  .formula{margin:6px 0 10px;padding:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px}
+  .fh{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}
+  .fl{font-size:12px;font-weight:700;color:#475569} .fs{font-size:13px;font-weight:700;color:#4338ca;flex:1}
+  .jaw{display:flex;align-items:stretch;gap:0} .half{flex:1;display:grid;grid-template-columns:repeat(8,1fr);gap:3px}
+  .milk .half{grid-template-columns:repeat(5,1fr)} .milk{margin-top:10px;padding-top:8px;border-top:1px dashed #cbd5e1}
+  .mid{width:2px;background:#cbd5e1;margin:0 6px;border-radius:2px}
+  .occl{height:2px;background:#cbd5e1;margin:5px 0;border-radius:2px}
+  .tb{position:relative;height:32px;min-width:0;border-radius:9px;border:1.5px solid #e2e8f0;background:#fff;font-size:12.5px;font-weight:700;color:#64748b;cursor:pointer;transition:all .12s;padding:0}
+  .tb:hover{border-color:#818cf8;color:#4338ca;transform:translateY(-1px)}
+  .tb.on{background:linear-gradient(135deg,#0ea5a3,#6366f1);border-color:transparent;color:#fff;box-shadow:0 3px 10px rgba(79,70,229,.35)}
+  .tb.dv{border:1.5px dashed #818cf8;background:#eef2ff;color:#4338ca}
+  .tb.svc::after{content:"";position:absolute;bottom:3px;left:50%;transform:translateX(-50%);width:12px;height:3px;border-radius:3px;background:#06b6d4}
+  .tb.on.svc::after{background:#fff}
+  .ff{display:flex;align-items:center;justify-content:space-between;margin-top:6px}
+  .sdot{display:inline-block;width:12px;height:3px;border-radius:3px;background:#06b6d4;vertical-align:middle}
   .badge{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:20px;white-space:nowrap}
   .ok{background:#dcfce7;color:#166534} .warn{background:#fef3c7;color:#92400e} .bad{background:#fee2e2;color:#991b1b}
   .dot{width:7px;height:7px;border-radius:50%;background:currentColor}
@@ -420,25 +464,30 @@
     return '<div class="row"><label>' + esc(pr.label) + (b.auto && b.auto[pr.key] ? '<br><span class="auto">● из услуги</span>' : '') + '</label><div>' + ctl + '</div></div>';
   }
 
+  function hasFormula(tpl) { return tpl.needTeeth || tpl.teethFromOthers || tpl.teethOptional; }
+
   function renderTeeth(b) {
     const tpl = tplById(b.tpl);
-    if (!tpl.needTeeth && !tpl.teethFromOthers) return '';
-    const shown = blockTeeth(b); const auto = tpl.teethFromOthers && !b.teeth.length;
+    if (!hasFormula(tpl)) return '';
+    const derived = tpl.teethFromOthers && !b.teeth.length ? blockTeeth(b) : [];
     const svcT = new Set(S.services.flatMap((s) => s.teeth));
-    let h = '<div class="row"><label>Зубы</label><div class="teeth">' +
-      (shown.length ? shown.map((t) => '<span class="tchip">' + fmtTooth(t) + '</span>').join('') + (auto ? '<span class="hint">как в блоках</span>' : '') : badge('bad', 'не выбраны')) +
-      '<button class="link" data-pick="' + b.uid + '">' + (b.pickerOpen ? 'Скрыть' : 'Изменить') + '</button></div></div>';
-    if (b.pickerOpen) {
-      const q = (arr) => '<div class="q">' + arr.map((t) => '<button class="tb ' + (b.teeth.includes(String(t)) ? 'on ' : '') + (svcT.has(String(t)) ? 'svc' : '') + '" data-tooth="' + b.uid + '" data-t="' + t + '">' + t + '</button>').join('') + '</div>';
-      const r = (a, z) => Array.from({ length: z }, (_, i) => a + i);
-      h += '<div class="grid">' +
-        '<div class="jaw">' + q(r(11, 8).reverse()) + q(r(21, 8)) + '</div>' +
-        '<div class="jaw">' + q(r(41, 8).reverse()) + q(r(31, 8)) + '</div>' +
-        (S.showMilk ? '<div class="jaw" style="margin-top:8px">' + q(r(51, 5).reverse()) + q(r(61, 5)) + '</div><div class="jaw">' + q(r(81, 5).reverse()) + q(r(71, 5)) + '</div>' : '') +
-        '<div style="text-align:center"><button class="link" data-milk="1">' + (S.showMilk ? 'Скрыть молочные' : 'Молочные зубы') + '</button>' +
-        '<span class="hint">голубая полоска — зуб есть в услугах</span></div></div>';
-    }
-    return h;
+    const btn = (t) => { t = String(t); const on = b.teeth.includes(t), dv = !on && derived.includes(t);
+      return '<button class="tb' + (on ? ' on' : dv ? ' dv' : '') + (svcT.has(t) ? ' svc' : '') + '" data-tooth="' + b.uid + '" data-t="' + t + '">' + t + '</button>'; };
+    const half = (arr) => '<div class="half">' + arr.map(btn).join('') + '</div>';
+    const r = (a, z) => Array.from({ length: z }, (_, i) => a + i);
+    const row = (L, R) => '<div class="jaw">' + half(L) + '<div class="mid"></div>' + half(R) + '</div>';
+    const sel = b.teeth.length ? b.teeth.map(fmtTooth).join(', ') : derived.length ? derived.map(fmtTooth).join(', ') + ' (как в блоках)' : '';
+    let note = '';
+    if (!b.teeth.length && !derived.length) {
+      note = tpl.needTeeth ? badge('bad', 'выберите зубы') : '';
+      if (b.hints.noTeeth && (tpl.needTeeth || b.hints.teethQty)) note = badge(tpl.needTeeth ? 'bad' : 'warn', 'в услуге зубы не указаны' + (b.hints.teethQty ? ' · кол-во ' + b.hints.teethQty : '') + ' — отметьте');
+    } else if (b.hints.teethQty && b.teeth.length && b.hints.teethQty !== b.teeth.length) note = badge('warn', 'по услугам ' + b.hints.teethQty + ' шт., отмечено ' + b.teeth.length);
+    return '<div class="formula"><div class="fh"><span class="fl">Зубы</span><span class="fs">' + esc(sel) + '</span>' + note +
+      (b.teeth.length ? '<button class="link" data-clear="' + b.uid + '">Сбросить</button>' : '') + '</div>' +
+      row(r(11, 8).reverse(), r(21, 8)) + '<div class="occl"></div>' + row(r(41, 8).reverse(), r(31, 8)) +
+      (S.showMilk ? '<div class="milk">' + row([55, 54, 53, 52, 51, 0, 0, 0].filter(Boolean), r(61, 5)) + '<div class="occl"></div>' + row([85, 84, 83, 82, 81], r(71, 5)) + '</div>' : '') +
+      '<div class="ff"><button class="link" data-milk="1">' + (S.showMilk ? 'Скрыть молочные' : 'Молочные зубы') + '</button>' +
+      (svcT.size ? '<span class="hint"><span class="sdot"></span> зуб есть в услугах</span>' : '') + '</div></div>';
   }
 
   function render() {
@@ -466,7 +515,7 @@
       const tpl = TEMPLATES.find((t) => (t.triggers || []).some((c) => s.code.startsWith(c)));
       return '<div class="svc"><span class="cd">' + esc(s.code) + '</span><span class="nm">' + esc(s.name.replace(/^\S+\s/, '')) +
         (s.teeth.length ? ' ' + s.teeth.map((t) => '<span class="tchip">' + fmtTooth(t) + '</span>').join(' ') : '') + '</span>' +
-        (isRec ? badge('ok', 'приём') : tpl ? badge('ok', tpl.title) : badge('warn', 'нет шаблона')) + '</div>';
+        (isRec ? badge('ok', 'приём') : tpl ? badge('ok', (tpl.id === 'caries' && S.blocks.some((b) => b.tpl === 'endoRestore' && b.teeth.some((t) => s.teeth.includes(t)))) ? 'Реставрация после эндо' : tpl.title) : badge('warn', 'нет шаблона')) + '</div>';
     }).join('') : '<div class="hint">Услуги не найдены</div>') + '</div></div>';
 
     // Блоки
@@ -542,15 +591,16 @@
     on('[data-p]', 'change', (e) => { const { b, key } = findBlock(e.target.dataset.p); const pr = tplById(b.tpl).params.find((x) => x.key === key);
       b.params[key] = pr.type === 'number' ? (+e.target.value || pr.default) : e.target.value; delete b.auto[key]; render(); });
     on('[data-seg]', 'click', (e) => { const { b, key } = findBlock(e.currentTarget.dataset.seg); b.params[key] = e.currentTarget.dataset.v; delete b.auto[key]; render(); });
-    on('[data-chip]', 'click', (e) => { const { b, key } = findBlock(e.currentTarget.dataset.chip); const v = e.currentTarget.dataset.v; const a = b.params[key] || [];
+    on('[data-chip]', 'click', (e) => { const { b, key } = findBlock(e.currentTarget.dataset.chip); const v = e.currentTarget.dataset.v; const a = b.params[key] || []; b.touched[key] = 1;
       b.params[key] = a.includes(v) ? a.filter((x) => x !== v) : a.concat(v); delete b.auto[key]; render(); });
     on('[data-tg]', 'click', (e) => { const { b, key } = findBlock(e.currentTarget.dataset.tg); b.params[key] = !b.params[key]; delete b.auto[key]; render(); });
     on('[data-pick]', 'click', (e) => { const b = S.blocks.find((x) => x.uid === +e.currentTarget.dataset.pick); b.pickerOpen = !b.pickerOpen; render(); });
     on('[data-tooth]', 'click', (e) => { const b = S.blocks.find((x) => x.uid === +e.currentTarget.dataset.tooth); const t = e.currentTarget.dataset.t;
-      b.teeth = b.teeth.includes(t) ? b.teeth.filter((x) => x !== t) : b.teeth.concat(t).sort(); render(); });
+      b.teeth = b.teeth.includes(t) ? b.teeth.filter((x) => x !== t) : b.teeth.concat(t).sort(); if (tplById(b.tpl).onTeeth) tplById(b.tpl).onTeeth(b); render(); });
     on('[data-milk]', 'click', () => { S.showMilk = !S.showMilk; render(); });
+    on('[data-clear]', 'click', (e) => { const b = S.blocks.find((x) => x.uid === +e.currentTarget.dataset.clear); b.teeth = []; if (tplById(b.tpl).onTeeth) tplById(b.tpl).onTeeth(b); render(); });
     on('[data-del]', 'click', (e) => { S.blocks = S.blocks.filter((x) => x.uid !== +e.currentTarget.dataset.del); render(); });
-    on('[data-add]', 'click', (e) => { const b = newBlock(e.currentTarget.dataset.add, [], 'manual'); b.pickerOpen = !!tplById(b.tpl).needTeeth; S.blocks.push(b); render(); });
+    on('[data-add]', 'click', (e) => { const b = newBlock(e.currentTarget.dataset.add, [], 'manual'); S.blocks.push(b); render(); });
     on('[data-pos]', 'click', (e) => { S.position = e.currentTarget.dataset.pos; S.posTouched = true; render(); });
     on('[data-mode]', 'click', (e) => { S.mode = e.currentTarget.dataset.mode; render(); });
     on('[data-tab]', 'click', (e) => { S.tab = e.currentTarget.dataset.tab; render(); });

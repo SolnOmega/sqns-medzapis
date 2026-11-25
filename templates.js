@@ -325,11 +325,14 @@
     const all = (pg && pg.plans) || [];
     const ortho = all.filter((p) => (p.treatmentPlanItems || []).some(isOrthoItem));
     const plans = ortho.filter((p) => p.applied);
-    const today = dDay(new Date());
+    const today = dDay(new Date()), vd = dDay(pg && pg.visitDate) || today;   // дата открытого визита, а не текущие часы
     const exams = [];
-    ((pg && pg.history && pg.history.visits) || []).forEach((v) => (v.journals || []).forEach((j) => {
-      if ((j.journalItems || []).some((it) => /Составлен план лечения/.test(it.content || ''))) { const d = dDay(j.startDate || v.date || v.startDate); if (d && d < today) exams.push(d); }
-    }));
+    ((pg && pg.history && pg.history.visits) || []).forEach((v) => {
+      if (pg.visitId && (v.id === pg.visitId || v.visitID === pg.visitId)) return;   // сам открытый визит не считается
+      (v.journals || []).forEach((j) => {
+        if ((j.journalItems || []).some((it) => /Составлен план лечения/.test(it.content || ''))) { const d = dDay(j.startDate || v.date || v.startDate); if (d && d < vd) exams.push(d); }
+      });
+    });
     const pending = plans.filter((p) => { const pd = dDay(p.date || p.created_at); return !exams.some((d) => d >= pd); });
     const nm = (p) => '«' + (p.title || 'План') + '»' + (dDay(p.date) ? ' от ' + fmtD(dDay(p.date)) : '');
     let why;
@@ -338,6 +341,7 @@
     else if (!plans.length) why = 'Ортопедический план ' + ortho.map(nm).join(', ') + ' — флажок «План принят в лечение» не стоит → консультация.';
     else if (pending.length) why = 'План ' + pending.map(nm).join(', ') + ' принят в лечение, записи с планом ещё не было → обследование и план.';
     else why = 'План ' + plans.map(nm).join(', ') + ' принят, но уже записан в дневнике от ' + fmtD(Math.max(...exams)) + ' → консультация. Если нужно записать план заново — смените блок вручную.';
+    why += ' (визит от ' + fmtD(vd) + ')';
     return { plans, pending, ready: pending.length > 0, why };
   }
   function postBuild(blocks, E) {

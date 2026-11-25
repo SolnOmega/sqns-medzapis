@@ -98,13 +98,18 @@
       let n = 0;
       (function walk(sc) {
         if (!sc || n++ > 5000) return;
-        if (Object.prototype.hasOwnProperty.call(sc, 'form') && sc.form && sc.form.dentalFormula && !out.formula) out.formula = sc.form.dentalFormula;
+        if (Object.prototype.hasOwnProperty.call(sc, 'form') && sc.form && sc.form.dentalFormula && !out.formula) {
+          const fm = sc.form; out.formula = fm.dentalFormula; out.visitId = fm.id || fm.visitID || null;
+          const jd = (fm.journals || []).map((j) => j.startDate).filter(Boolean);
+          out.visitDate = jd[0] || fm.date || fm.startDate || fm.visitDate || fm.datetime || fm.start || null;
+        }
         if (Object.prototype.hasOwnProperty.call(sc, 'treatmentPlans') && Array.isArray(sc.treatmentPlans) && !out.plans.length) out.plans = sc.treatmentPlans;
         if (Object.prototype.hasOwnProperty.call(sc, 'caseHistory') && sc.caseHistory && !out.history) out.history = sc.caseHistory;
         for (let c = sc.$$childHead; c; c = c.$$nextSibling) walk(c);
       })(root);
       if (!out.formula && out.history && out.history.visits && out.history.visits[0]) out.formula = out.history.visits[0].dentalFormula || null;
       const pl = out.plans[0]; if (pl) out.clientID = pl.clientInfoID;
+      if (!out.visitDate) { const c = getCtx(); if (c && c.j) out.visitDate = c.j.startDate; }
     } catch (e) { console.warn('[Медзапись] не удалось прочитать данные страницы', e); }
     return out;
   }

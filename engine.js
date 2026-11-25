@@ -79,6 +79,7 @@
       if (pr.default !== undefined) p[pr.key] = Array.isArray(pr.default) ? pr.default.slice() : pr.default;
       else if (pr.type === 'select' || pr.type === 'seg') p[pr.key] = pr.options[0].v;
       else if (pr.type === 'chips') p[pr.key] = [];
+      else if (pr.type === 'perTooth') p[pr.key] = {};
       else if (pr.type === 'toggle') p[pr.key] = false;
       else p[pr.key] = '';
     });
@@ -425,6 +426,13 @@
   .tsel{flex:1;width:auto;font-weight:700;font-size:14px;border:1.5px solid transparent;background:#f8fafc;padding:5px 8px;border-radius:9px;cursor:pointer}
   .tsel:hover{border-color:#c7d2fe}
   .add{display:flex;flex-wrap:wrap;gap:6px}
+  .pt{margin:8px 0;padding:10px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc}
+  .pt-h{font-size:12px;font-weight:700;color:#475569;margin-bottom:6px}
+  .pt-r{display:flex;align-items:flex-end;gap:6px;padding:6px 0;border-top:1px dashed #e2e8f0} .pt-r:first-of-type{border-top:0}
+  .pt-r .tchip{margin-bottom:6px}
+  .pt-f{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0} .pt-f:nth-of-type(1){flex:1.8} .pt-t{flex:1.2} .pt-t input{padding:6px;font-size:12.5px} .pt-f span{font-size:10.5px;color:#64748b;font-weight:600}
+  .pt-f select{padding:6px 6px;font-size:12.5px} .pt-f select:disabled{background:#f1f5f9;color:#94a3b8}
+  select.need{border-color:#fca5a5;background:#fff7f7}
   .morebtn{display:block;width:100%;margin-top:6px;border:1px dashed #cbd5e1;background:#f8fafc;color:#475569;border-radius:10px;padding:7px;font-size:12.5px;font-weight:600;cursor:pointer}
   .morebtn:hover{background:#eef2ff;color:#4338ca;border-color:#a5b4fc}
   .addb{border:1px dashed #a5b4fc;background:#fff;color:#4338ca;border-radius:10px;padding:7px 11px;font-size:12.5px;font-weight:600;cursor:pointer}
@@ -477,6 +485,7 @@
     const tpl = tplById(b.tpl); const v = b.params[pr.key]; const id = 'b' + b.uid + '.' + pr.key;
     if (pr.show && !pr.show(b.params)) return '';
     if (pr.adv && !b.showAdv && !b.auto[pr.key] && !b.touched[pr.key]) return '';
+    if (pr.type === 'perTooth') return renderPerTooth(b, pr);
     let ctl = '';
     if (pr.type === 'select') ctl = '<select data-p="' + id + '">' + pr.options.map((o) => '<option value="' + esc(o.v) + '"' + (o.v === v ? ' selected' : '') + '>' + esc(o.l) + '</option>').join('') + '</select>';
     else if (pr.type === 'seg') ctl = '<div class="seg">' + pr.options.map((o) => '<button data-seg="' + id + '" data-v="' + esc(o.v) + '" class="' + (o.v === v ? 'on' : '') + '">' + esc(o.l) + '</button>').join('') + '</div>';
@@ -489,6 +498,28 @@
   }
 
   function hasFormula(tpl) { return tpl.needTeeth || tpl.teethFromOthers || tpl.teethOptional; }
+
+  function ptRow(b, pr, t) {
+    const store = b.params[pr.key] || (b.params[pr.key] = {});
+    if (!store[t]) store[t] = pr.init ? pr.init(b, t) : {};
+    return store[t];
+  }
+  function renderPerTooth(b, pr) {
+    if (!b.teeth.length) return '<div class="row"><label>' + esc(pr.label) + '</label><div>' + badge('warn', 'отметьте зубы в формуле') + '</div></div>';
+    let h = '<div class="pt"><div class="pt-h">' + esc(pr.label) + '</div>';
+    b.teeth.forEach((t) => {
+      const row = ptRow(b, pr, t);
+      h += '<div class="pt-r"><span class="tchip">' + fmtTooth(t) + '</span>' + pr.fields.map((f) => {
+        if (f.type === 'text') return '<label class="pt-f pt-t"><span>' + esc(f.label) + '</span><input type="text" placeholder="' + esc(f.placeholder || '') + '" value="' + esc(row[f.key] || '') + '" data-pt="' + b.uid + '|' + pr.key + '|' + t + '|' + f.key + '"></label>';
+        const opts = f.options(row) || [];
+        const bad = !f.optional && !row[f.key];
+        return '<label class="pt-f"><span>' + esc(f.label) + '</span><select class="' + (bad && opts.length ? 'need' : '') + '" data-pt="' + b.uid + '|' + pr.key + '|' + t + '|' + f.key + '"' + (opts.length ? '' : ' disabled') + '>' +
+          '<option value="">' + (opts.length ? '—' : '…') + '</option>' +
+          opts.map((o) => '<option value="' + esc(o.v) + '"' + (String(row[f.key]) === String(o.v) ? ' selected' : '') + '>' + esc(o.l) + '</option>').join('') + '</select></label>';
+      }).join('') + '</div>';
+    });
+    return h + '</div>';
+  }
 
   function advLink(b) {
     const t = tplById(b.tpl);
@@ -526,6 +557,7 @@
     const prevScroll = P.querySelector('.body') ? P.querySelector('.body').scrollTop : 0;
     if (!S) buildInitialState();
     const pi = positionInfo(); const ti = timeInfo(ctx); const iss = issues(ctx); const hasBad = iss.some((i) => i.lvl === 'bad' && !/код не подтверждён/.test(i.text));
+    S.blocks.forEach((b) => (tplById(b.tpl).params || []).forEach((pr) => { if (pr.type === 'perTooth') b.teeth.forEach((t) => ptRow(b, pr, t)); }));
     const R = compose();
 
     let h = '<div class="hd"><div style="font-size:26px">🦷</div><h1>Медзапись<small>' +
@@ -633,14 +665,22 @@
     if (q('undo')) q('undo').onclick = doUndo;
     if (q('dur')) q('dur').onchange = (e) => { S.duration = Math.max(5, +e.target.value || DEFAULT_DURATION); render(); };
     on('[data-p]', 'change', (e) => { const { b, key } = findBlock(e.target.dataset.p); const pr = tplById(b.tpl).params.find((x) => x.key === key);
-      b.params[key] = pr.type === 'number' ? (+e.target.value || pr.default) : e.target.value; delete b.auto[key]; b.touched[key] = 1; render(); });
-    on('[data-seg]', 'click', (e) => { const { b, key } = findBlock(e.currentTarget.dataset.seg); b.params[key] = e.currentTarget.dataset.v; delete b.auto[key]; b.touched[key] = 1; render(); });
+      b.params[key] = pr.type === 'number' ? (+e.target.value || pr.default) : e.target.value; delete b.auto[key]; b.touched[key] = 1; const tp = tplById(b.tpl); if (tp.onParam) tp.onParam(b, key); render(); });
+    on('[data-seg]', 'click', (e) => { const { b, key } = findBlock(e.currentTarget.dataset.seg); b.params[key] = e.currentTarget.dataset.v; delete b.auto[key]; b.touched[key] = 1; const tp = tplById(b.tpl); if (tp.onParam) tp.onParam(b, key); render(); });
     on('[data-chip]', 'click', (e) => { const { b, key } = findBlock(e.currentTarget.dataset.chip); const v = e.currentTarget.dataset.v; const a = b.params[key] || []; b.touched[key] = 1;
       b.params[key] = a.includes(v) ? a.filter((x) => x !== v) : a.concat(v); delete b.auto[key]; render(); });
-    on('[data-tg]', 'click', (e) => { const { b, key } = findBlock(e.currentTarget.dataset.tg); b.params[key] = !b.params[key]; delete b.auto[key]; b.touched[key] = 1; render(); });
+    on('[data-tg]', 'click', (e) => { const { b, key } = findBlock(e.currentTarget.dataset.tg); b.params[key] = !b.params[key]; delete b.auto[key]; b.touched[key] = 1; const tp = tplById(b.tpl); if (tp.onParam) tp.onParam(b, key); render(); });
     on('[data-pick]', 'click', (e) => { const b = S.blocks.find((x) => x.uid === +e.currentTarget.dataset.pick); b.pickerOpen = !b.pickerOpen; render(); });
     on('[data-tooth]', 'click', (e) => { const b = S.blocks.find((x) => x.uid === +e.currentTarget.dataset.tooth); const t = e.currentTarget.dataset.t;
       b.teeth = b.teeth.includes(t) ? b.teeth.filter((x) => x !== t) : b.teeth.concat(t).sort(); if (tplById(b.tpl).onTeeth) tplById(b.tpl).onTeeth(b); render(); });
+    on('[data-pt]', 'change', (e) => {
+      const [u, key, t, fk] = e.target.dataset.pt.split('|'); const b = S.blocks.find((x) => x.uid === +u);
+      const pr = tplById(b.tpl).params.find((x) => x.key === key); const row = ptRow(b, pr, t);
+      row[fk] = e.target.value;
+      let after = false;
+      pr.fields.forEach((f) => { if (f.type === 'text') { if (f.key === fk) after = true; return; } if (after && row[f.key] && !(f.options(row) || []).some((o) => String(o.v) === String(row[f.key]))) row[f.key] = ''; if (f.key === fk) after = true; });
+      b.touched[key] = 1; render();
+    });
     on('[data-adv]', 'click', (e) => { const b = S.blocks.find((x) => x.uid === +e.currentTarget.dataset.adv); b.showAdv = !b.showAdv; render(); });
     on('[data-milk]', 'click', () => { S.showMilk = !S.showMilk; render(); });
     on('[data-clear]', 'click', (e) => { const b = S.blocks.find((x) => x.uid === +e.currentTarget.dataset.clear); b.teeth = []; if (tplById(b.tpl).onTeeth) tplById(b.tpl).onTeeth(b); render(); });

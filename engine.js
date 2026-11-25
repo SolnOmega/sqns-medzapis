@@ -82,7 +82,7 @@
       else if (pr.type === 'select' || pr.type === 'seg') p[pr.key] = pr.options[0].v;
       else if (pr.type === 'chips') p[pr.key] = [];
       else if (pr.type === 'perTooth') p[pr.key] = {};
-      else if (pr.type === 'teethSub') p[pr.key] = [];
+      else if (pr.type === 'teethSub' || pr.type === 'toothSet') p[pr.key] = [];
       else if (pr.type === 'toggle') p[pr.key] = false;
       else p[pr.key] = '';
     });
@@ -434,6 +434,7 @@
   .tb{position:relative;height:32px;min-width:0;border-radius:9px;border:1.5px solid #e2e8f0;background:#fff;font-size:12.5px;font-weight:700;color:#64748b;cursor:pointer;transition:all .12s;padding:0}
   .tb:hover{border-color:#818cf8;color:#4338ca;transform:translateY(-1px)}
   .tb.on{background:linear-gradient(135deg,#0ea5a3,#6366f1);border-color:transparent;color:#fff;box-shadow:0 3px 10px rgba(79,70,229,.35)}
+  .tsum{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-height:26px} .muted{color:#94a3b8;font-size:12.5px} .formula.mini{margin:6px 0 2px;padding:8px} .formula.mini .tb{height:26px;font-size:11.5px}
   .tb.dv{border:1.5px dashed #818cf8;background:#eef2ff;color:#4338ca}
   .tb.svc::after{content:"";position:absolute;bottom:3px;left:50%;transform:translateX(-50%);width:12px;height:3px;border-radius:3px;background:#06b6d4}
   .tb.on.svc::after{background:#fff}
@@ -523,12 +524,22 @@
     if (pr.type === 'select') ctl = '<select data-p="' + id + '">' + pr.options.map((o) => '<option value="' + esc(o.v) + '"' + (o.v === v ? ' selected' : '') + '>' + esc(o.l) + '</option>').join('') + '</select>';
     else if (pr.type === 'seg') ctl = '<div class="seg">' + pr.options.map((o) => '<button data-seg="' + id + '" data-v="' + esc(o.v) + '" class="' + (o.v === v ? 'on' : '') + '">' + esc(o.l) + '</button>').join('') + '</div>';
     else if (pr.type === 'teethSub') ctl = b.teeth.length ? '<div class="chips">' + b.teeth.map((t) => '<button data-chip="' + id + '" data-v="' + esc(t) + '" class="chip ' + ((v || []).includes(t) ? 'on' : '') + '">' + fmtTooth(t) + '</button>').join('') + '</div>' : badge('warn', 'отметьте зубы в формуле');
+    else if (pr.type === 'toothSet') {
+      const val = (v || []).map(String), hl = new Set(((pr.hl && pr.hl(b, PAGE)) || []).map(String)), open = (b.tsOpen || {})[pr.key];
+      const need = pr.need && pr.need(b, PAGE) && !val.length;
+      const btn = (t) => { t = String(t); return '<button class="tb' + (val.includes(t) ? ' on' : hl.has(t) ? ' dv' : '') + '" data-ts="' + id + '" data-t="' + t + '">' + t + '</button>'; };
+      const r = (a, z) => Array.from({ length: z }, (_, i) => a + i), half = (arr) => '<div class="half">' + arr.map(btn).join('') + '</div>';
+      const row = (L, R) => '<div class="jaw">' + half(L) + '<div class="mid"></div>' + half(R) + '</div>';
+      ctl = '<div class="tsum">' + (val.length ? '<span class="fs">' + val.slice().sort().map(fmtTooth).join(', ') + '</span>' : need ? badge('bad', pr.needText || 'укажите зубы') : '<span class="muted">не выбрано</span>') +
+        ' <button class="link" data-tso="' + id + '">' + (open ? 'Свернуть' : val.length ? 'Изменить' : 'Выбрать') + '</button></div>' +
+        (open ? '<div class="formula mini">' + row(r(11, 8).reverse(), r(21, 8)) + '<div class="occl"></div>' + row(r(41, 8).reverse(), r(31, 8)) + (pr.hlText && hl.size ? '<div class="ff"><span class="hint">пунктир — ' + esc(pr.hlText) + '</span></div>' : '') + '</div>' : '');
+    }
     else if (pr.type === 'chips') ctl = '<div class="chips">' + pr.options.map((o) => '<button data-chip="' + id + '" data-v="' + esc(o.v) + '" class="chip ' + ((v || []).includes(o.v) ? 'on' : '') + '">' + esc(o.l) + '</button>').join('') + '</div>';
     else if (pr.type === 'toggle') ctl = '<button class="tg ' + (v ? 'on' : '') + '" data-tg="' + id + '"></button>';
     else if (pr.type === 'number') ctl = '<input type="number" data-p="' + id + '" value="' + esc(v) + '" min="' + (pr.min || 0) + '" max="' + (pr.max || 99) + '" style="width:90px">';
     else ctl = '<input type="text" data-p="' + id + '" value="' + esc(v) + '" placeholder="' + esc(pr.placeholder || '') + '">';
     void tpl;
-    return '<div class="row"><label>' + esc(pr.label) + (b.auto && b.auto[pr.key] ? '<br><span class="auto">● из услуги</span>' : '') + '</label><div>' + ctl + '</div></div>';
+    return '<div class="row"><label>' + esc(pr.label) + (b.auto && b.auto[pr.key] ? '<br><span class="auto">● ' + esc(pr.autoText || 'из услуги') + '</span>' : '') + '</label><div>' + ctl + '</div></div>';
   }
 
   function hasFormula(tpl) { return tpl.needTeeth || tpl.teethFromOthers || tpl.teethOptional; }
@@ -705,6 +716,9 @@
     on('[data-chip]', 'click', (e) => { const { b, key } = findBlock(e.currentTarget.dataset.chip); const v = e.currentTarget.dataset.v; const a = b.params[key] || []; b.touched[key] = 1;
       b.params[key] = a.includes(v) ? a.filter((x) => x !== v) : a.concat(v); delete b.auto[key]; const tp = tplById(b.tpl); if (tp.onParam) tp.onParam(b, key); render(); });
     on('[data-tg]', 'click', (e) => { const { b, key } = findBlock(e.currentTarget.dataset.tg); b.params[key] = !b.params[key]; delete b.auto[key]; b.touched[key] = 1; const tp = tplById(b.tpl); if (tp.onParam) tp.onParam(b, key); render(); });
+    on('[data-ts]', 'click', (e) => { const { b, key } = findBlock(e.currentTarget.dataset.ts); const t = e.currentTarget.dataset.t; const a = (b.params[key] || []).map(String);
+      b.params[key] = a.includes(t) ? a.filter((x) => x !== t) : a.concat(t).sort(); delete b.auto[key]; b.touched[key] = 1; const tp = tplById(b.tpl); if (tp.onParam) tp.onParam(b, key); render(); });
+    on('[data-tso]', 'click', (e) => { const { b, key } = findBlock(e.currentTarget.dataset.tso); b.tsOpen = b.tsOpen || {}; b.tsOpen[key] = !b.tsOpen[key]; render(); });
     on('[data-pick]', 'click', (e) => { const b = S.blocks.find((x) => x.uid === +e.currentTarget.dataset.pick); b.pickerOpen = !b.pickerOpen; render(); });
     on('[data-tooth]', 'click', (e) => { const b = S.blocks.find((x) => x.uid === +e.currentTarget.dataset.tooth); const t = e.currentTarget.dataset.t;
       b.teeth = b.teeth.includes(t) ? b.teeth.filter((x) => x !== t) : b.teeth.concat(t).sort(); if (tplById(b.tpl).onTeeth) tplById(b.tpl).onTeeth(b); (tplById(b.tpl).params || []).forEach((pr) => { if (pr.type === 'teethSub') b.params[pr.key] = (b.params[pr.key] || []).filter((x) => b.teeth.includes(x)); }); render(); });

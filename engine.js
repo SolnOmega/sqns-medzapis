@@ -31,14 +31,20 @@
   const LAT = { 'А': 'A', 'В': 'B', 'С': 'C', 'Е': 'E', 'К': 'K', 'М': 'M', 'Н': 'H', 'О': 'O', 'Р': 'P', 'Т': 'T', 'Х': 'X' };
   const normCode = (name) => ((name || '').trim().split(/\s+/)[0] || '').replace(/[АВСЕКМНОРТХ]/g, (c) => LAT[c]);
 
+  // На странице может быть несколько дневников визита: берём тот, что сейчас открыт (видим на экране),
+  // а у формы — journals[journalIndex]. Если видимых несколько — тот, что ниже в ленте (только что созданный).
+  const visible = (el) => !!(el && (el.offsetParent || el.getClientRects().length)) && getComputedStyle(el).visibility !== 'hidden';
   function getCtx() {
     if (!ng()) return null;
     let sc = null, j = null;
-    const eg = document.querySelector('.egisz-fields-list__semd');
-    if (eg) { sc = scopeOf(eg); j = sc && sc.form && sc.form.journals && sc.form.journals[sc.journalIndex]; }
+    const egs = [...document.querySelectorAll('.egisz-fields-list__semd')].filter(visible);
+    for (const eg of egs.reverse()) {
+      const s2 = scopeOf(eg); const j2 = s2 && s2.form && s2.form.journals && s2.form.journals[s2.journalIndex];
+      if (j2 && j2.journalItems) { sc = s2; j = j2; break; }
+    }
     if (!j) {
-      const ji = document.querySelector('[ng-controller="JournalItemController"]');
-      if (ji) { sc = scopeOf(ji); j = sc && sc.journal; }
+      const jis = [...document.querySelectorAll('[ng-controller="JournalItemController"]')].filter(visible);
+      for (const ji of jis.reverse()) { const s2 = scopeOf(ji); if (s2 && s2.journal && s2.journal.journalItems) { sc = s2; j = s2.journal; break; } }
     }
     if (!j || !j.journalItems) return null;
     return { sc, j, d: j.signableDocJournalInfoData || null };
@@ -692,7 +698,7 @@
     const R = compose();
 
     let h = '<div class="hd"><div style="font-size:26px">🦷</div><h1>Медзапись<small>' +
-      (ctx ? 'Дневник найден · услуг в визите: ' + S.services.length : 'Дневник не найден') + '</small></h1><button class="x" id="refresh" title="Перечитать страницу (планы, формулу, услуги)">↻</button><button class="x" id="close">×</button></div><div class="body">';
+      (ctx ? (() => { const js = (ctx.sc && ctx.sc.form && ctx.sc.form.journals) || []; return js.length > 1 ? 'Дневник ' + (js.indexOf(ctx.j) + 1) + ' из ' + js.length + ' (' + (ctx.j.startTime || '') + ')' : 'Дневник найден'; })() + ' · услуг в визите: ' + S.services.length : 'Дневник не найден') + '</small></h1><button class="x" id="refresh" title="Перечитать страницу (планы, формулу, услуги)">↻</button><button class="x" id="close">×</button></div><div class="body">';
 
     if (!ctx) {
       h += '<div class="card empty">Откройте визит пациента.<br>Если дневника ещё нет — создам его со стандартным шаблоном.<br><br>' +

@@ -31,23 +31,28 @@
   const LAT = { 'А': 'A', 'В': 'B', 'С': 'C', 'Е': 'E', 'К': 'K', 'М': 'M', 'Н': 'H', 'О': 'O', 'Р': 'P', 'Т': 'T', 'Х': 'X' };
   const normCode = (name) => ((name || '').trim().split(/\s+/)[0] || '').replace(/[АВСЕКМНОРТХ]/g, (c) => LAT[c]);
 
-  // На странице может быть несколько дневников визита: берём тот, что сейчас открыт (видим на экране),
-  // а у формы — journals[journalIndex]. Если видимых несколько — тот, что ниже в ленте (только что созданный).
-  const visible = (el) => !!(el && (el.offsetParent || el.getClientRects().length)) && getComputedStyle(el).visibility !== 'hidden';
+  const ENGINE_VERSION = '1.5.3';
+  // В визите может быть несколько дневников: SQNS держит их все на странице (каждый со своим journalIndex).
+  // Какой открыт, по странице не понять, поэтому: выбранный в панели → иначе последний пустой → иначе последний.
+  let JPICK = null;   // индекс дневника, выбранный врачом в панели
+  const jEmpty = (j) => !(j.journalItems || []).some((it) => String(it.content || '').replace(/<[^>]+>|&nbsp;|\s/g, ''));
+  function allJournals() {
+    const out = [];
+    document.querySelectorAll('.egisz-fields-list__semd').forEach((eg) => {
+      const s2 = scopeOf(eg); const js = s2 && s2.form && s2.form.journals; const j2 = js && js[s2.journalIndex];
+      if (j2 && j2.journalItems && !out.some((x) => x.j === j2)) out.push({ sc: s2, j: j2, idx: s2.journalIndex, all: js });
+    });
+    if (!out.length) document.querySelectorAll('[ng-controller="JournalItemController"]').forEach((ji) => {
+      const s2 = scopeOf(ji); if (s2 && s2.journal && s2.journal.journalItems && !out.some((x) => x.j === s2.journal)) out.push({ sc: s2, j: s2.journal, idx: out.length, all: null });
+    });
+    return out.sort((a, b) => a.idx - b.idx);
+  }
   function getCtx() {
     if (!ng()) return null;
-    let sc = null, j = null;
-    const egs = [...document.querySelectorAll('.egisz-fields-list__semd')].filter(visible);
-    for (const eg of egs.reverse()) {
-      const s2 = scopeOf(eg); const j2 = s2 && s2.form && s2.form.journals && s2.form.journals[s2.journalIndex];
-      if (j2 && j2.journalItems) { sc = s2; j = j2; break; }
-    }
-    if (!j) {
-      const jis = [...document.querySelectorAll('[ng-controller="JournalItemController"]')].filter(visible);
-      for (const ji of jis.reverse()) { const s2 = scopeOf(ji); if (s2 && s2.journal && s2.journal.journalItems) { sc = s2; j = s2.journal; break; } }
-    }
-    if (!j || !j.journalItems) return null;
-    return { sc, j, d: j.signableDocJournalInfoData || null };
+    const L = allJournals(); if (!L.length) return null;
+    let c = JPICK != null ? L.find((x) => x.idx === JPICK) : null;
+    if (!c) c = L.slice().reverse().find((x) => jEmpty(x.j)) || L[L.length - 1];
+    return { sc: c.sc, j: c.j, d: c.j.signableDocJournalInfoData || null, idx: c.idx, list: L };
   }
 
   function getServices() {
@@ -431,6 +436,7 @@
   }
 
   async function createDiary() {
+    JPICK = null;
     const before = getCtx(), oldJ = before && before.j, oldN = before && before.sc && before.sc.form && before.sc.form.journals ? before.sc.form.journals.length : 0;
     const btn = document.querySelector('.case-history-journal-add__button');
     if (!btn) return toast('Кнопка «Дневник приема» не найдена — откройте визит', 'bad');
@@ -698,12 +704,17 @@
     const R = compose();
 
     let h = '<div class="hd"><div style="font-size:26px">🦷</div><h1>Медзапись<small>' +
-      (ctx ? (() => { const js = (ctx.sc && ctx.sc.form && ctx.sc.form.journals) || []; return js.length > 1 ? 'Дневник ' + (js.indexOf(ctx.j) + 1) + ' из ' + js.length + ' (' + (ctx.j.startTime || '') + ')' : 'Дневник найден'; })() + ' · услуг в визите: ' + S.services.length : 'Дневник не найден') + '</small></h1><button class="x" id="refresh" title="Перечитать страницу (планы, формулу, услуги)">↻</button><button class="x" id="close">×</button></div><div class="body">';
+      (ctx ? (ctx.list.length > 1 ? 'Дневников в визите: ' + ctx.list.length : 'Дневник найден') + ' · услуг в визите: ' + S.services.length : 'Дневник не найден') + ' · v' + ENGINE_VERSION + '</small></h1><button class="x" id="refresh" title="Перечитать страницу (планы, формулу, услуги)">↻</button><button class="x" id="close">×</button></div><div class="body">';
 
     if (!ctx) {
       h += '<div class="card empty">Откройте визит пациента.<br>Если дневника ещё нет — создам его со стандартным шаблоном.<br><br>' +
         '<button class="btn pri" id="mkdiary" style="flex:none">＋ Создать дневник приёма</button><br><br><button class="link" id="rescan">Обновить</button></div></div>';
       P.innerHTML = h; bind(P); return;
+    }
+    if (ctx.list.length > 1) {
+      h += '<div class="card"><div class="subh" style="margin-top:0">В какой дневник вставлять</div><div class="seg">' + ctx.list.map((x, i) =>
+        '<button data-jpick="' + x.idx + '" class="' + (x.j === ctx.j ? 'on' : '') + '">Дневник ' + (i + 1) + (x.j.startTime ? ' · ' + esc(x.j.startTime) : '') + (jEmpty(x.j) ? ' · пустой' : ' · заполнен') + '</button>').join('') +
+        '</div><div class="hint" style="margin-top:6px">Выбирайте тот, что открыт в SQNS. По умолчанию — последний пустой.</div></div>';
     }
 
     // Шаблоны: что выбрано и быстрый выбор
@@ -799,6 +810,7 @@
     if (q('close')) q('close').onclick = closePanel;
     if (q('mkdiary')) q('mkdiary').onclick = createDiary;
     if (q('mkdiary2')) q('mkdiary2').onclick = createDiary;
+    on('[data-jpick]', 'click', (e) => { JPICK = +e.currentTarget.dataset.jpick; undoSnap = null; buildInitialState(); render(); });
     if (q('rescan')) q('rescan').onclick = () => { buildInitialState(); render(); };
     if (q('refresh')) q('refresh').onclick = () => { buildInitialState(); render(); toast('Данные страницы перечитаны'); };
     if (q('insert')) q('insert').onclick = doInsert;

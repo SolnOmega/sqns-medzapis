@@ -90,6 +90,59 @@
   }
   // Данные страницы SQNS: формула текущего визита, планы лечения, история визитов (только чтение)
   let PAGE = null;
+  // ---- Состав планов лечения: в списке SQNS отдаёт планы без услуг, догружаем каждый план с сервера ----
+  // Адрес как у самого SQNS: /admin/treatmentPlan/getJson/page/0/wid/<WID>/id/<ID>/sessionKeyAction
+  let WID = null; const PLAN_ITEMS = {}, PLAN_LOAD = {};
+  (function hookWid() {
+    const grab = (u) => { const m = String(u || '').match(/\/wid\/([A-Za-z0-9]+)/); if (m) WID = m[1]; };
+    const o = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function (m, u) { try { grab(u); } catch (e) { /* */ } return o.apply(this, arguments); };
+    const f = window.fetch; if (f) window.fetch = function (u) { try { grab(u && u.url ? u.url : u); } catch (e) { /* */ } return f.apply(this, arguments); };
+  })();
+  function findWid() {
+    if (WID) return WID;
+    try {
+      const html = document.documentElement.innerHTML; const m = html.match(/\/wid\/([A-Za-z0-9]{16,})/) || html.match(/["']wid["']\s*[:=]\s*["']([A-Za-z0-9]{16,})/); if (m) return (WID = m[1]);
+      const app = document.querySelector('[ng-app]'); const root = ng().element(app).injector().get('$rootScope'); let n = 0, found = null;
+      (function walk(sc) { if (!sc || found || n++ > 5000) return; if (typeof sc.wid === 'string' && sc.wid.length >= 16) found = sc.wid; for (let c = sc.$$childHead; c; c = c.$$nextSibling) walk(c); })(root);
+      if (found) return (WID = found);
+    } catch (e) { /* */ }
+    return null;
+  }
+  function findItems(o, d) {
+    if (!o || typeof o !== 'object' || d > 6) return null;
+    if (Array.isArray(o.treatmentPlanItems)) return o.treatmentPlanItems;
+    for (const k of Object.keys(o)) { const r = findItems(o[k], (d || 0) + 1); if (r) return r; }
+    return null;
+  }
+  function loadPlanItems(id) {
+    const w = findWid(), key = id + '|' + (w || '');
+    if (PLAN_LOAD[key]) return PLAN_LOAD[key];
+    const urls = (w ? ['/admin/treatmentPlan/getJson/page/0/wid/' + w + '/id/' + id + '/sessionKeyAction'] : []).concat(['/admin/treatmentPlan/getJson/page/0/id/' + id + '/sessionKeyAction', '/admin/treatmentPlan/getJson/id/' + id]);
+    PLAN_LOAD[key] = (async () => {
+      for (const u of urls) {
+        try {
+          const r = await fetch(u, { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest', Accept: 'application/json' } });
+          if (!r.ok) continue;
+          const j = await r.json(); const it = findItems(j, 0);
+          if (it) { PLAN_ITEMS[id] = it; console.log('[Медзапись] состав плана ' + id + ' загружен: ' + it.length + ' поз.'); return true; }
+        } catch (e) { /* пробуем следующий адрес */ }
+      }
+      console.warn('[Медзапись] не удалось загрузить состав плана ' + id); return false;
+    })();
+    return PLAN_LOAD[key];
+  }
+  function ensurePlanItems(plans) {
+    const w = findWid();
+    const need = plans.filter((p) => !(p.treatmentPlanItems || []).length && !(String(p.id) in PLAN_ITEMS) && !PLAN_LOAD[p.id + '|' + (w || '')]);
+    if (!need.length) return;
+    Promise.all(need.map((p) => loadPlanItems(p.id))).then((res) => {
+      if (!res.some(Boolean)) return;
+      const untouched = !S || (!Object.keys(S.edits || {}).length && S.blocks.every((b) => !Object.keys(b.touched || {}).length));
+      if (S && untouched) { buildInitialState(); if (isOpen) render(); }
+      else if (S && isOpen) toast('Состав плана загружен — нажмите ↻, чтобы обновить блок');
+    });
+  }
   function readPage() {
     const out = { formula: null, plans: [], history: null, clientID: null };
     try {
@@ -109,6 +162,8 @@
       })(root);
       if (!out.formula && out.history && out.history.visits && out.history.visits[0]) out.formula = out.history.visits[0].dentalFormula || null;
       const pl = out.plans[0]; if (pl) out.clientID = pl.clientInfoID;
+      out.plans = out.plans.map((p) => (!(p.treatmentPlanItems || []).length && PLAN_ITEMS[p.id] ? Object.assign({}, p, { treatmentPlanItems: PLAN_ITEMS[p.id], _loaded: true }) : p));
+      ensurePlanItems(out.plans);
       if (!out.visitDate) { const c = getCtx(); if (c && c.j) out.visitDate = c.j.startDate; }
     } catch (e) { console.warn('[Медзапись] не удалось прочитать данные страницы', e); }
     return out;
@@ -612,7 +667,7 @@
     const R = compose();
 
     let h = '<div class="hd"><div style="font-size:26px">🦷</div><h1>Медзапись<small>' +
-      (ctx ? 'Дневник найден · услуг в визите: ' + S.services.length : 'Дневник не найден') + '</small></h1><button class="x" id="close">×</button></div><div class="body">';
+      (ctx ? 'Дневник найден · услуг в визите: ' + S.services.length : 'Дневник не найден') + '</small></h1><button class="x" id="refresh" title="Перечитать страницу (планы, формулу, услуги)">↻</button><button class="x" id="close">×</button></div><div class="body">';
 
     if (!ctx) {
       h += '<div class="card empty">Откройте визит пациента.<br>Если дневника ещё нет — создам его со стандартным шаблоном.<br><br>' +
@@ -712,6 +767,7 @@
     if (q('close')) q('close').onclick = closePanel;
     if (q('mkdiary')) q('mkdiary').onclick = createDiary;
     if (q('rescan')) q('rescan').onclick = () => { buildInitialState(); render(); };
+    if (q('refresh')) q('refresh').onclick = () => { buildInitialState(); render(); toast('Данные страницы перечитаны'); };
     if (q('insert')) q('insert').onclick = doInsert;
     if (q('undo')) q('undo').onclick = doUndo;
     if (q('dur')) q('dur').onchange = (e) => { S.duration = Math.max(5, +e.target.value || DEFAULT_DURATION); render(); };
@@ -761,6 +817,7 @@
       if (!document.body) return;
       if (host && !document.body.contains(host)) { host = null; }   // страницу перерисовали — монтируем заново
       if (!host) { mount(); console.log('[Медзапись] кнопка добавлена'); }
+      if (!S) { try { readPage(); } catch (e) { /* */ } }
     } catch (e) { console.error('[Медзапись] ошибка запуска', e); }
   };
   start();

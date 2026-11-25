@@ -323,7 +323,8 @@
   const fmtD = (t) => { const d = new Date(t); return ('0' + d.getDate()).slice(-2) + '.' + ('0' + (d.getMonth() + 1)).slice(-2) + '.' + d.getFullYear(); };
   function orthoPlanState(pg) {
     const all = (pg && pg.plans) || [];
-    const ortho = all.filter((p) => (p.treatmentPlanItems || []).some(isOrthoItem));
+    const noItems = (p) => !(p.treatmentPlanItems || []).length;   // в списке планов SQNS состав часто не загружен
+    const ortho = all.filter((p) => noItems(p) || (p.treatmentPlanItems || []).some(isOrthoItem));
     const plans = ortho.filter((p) => p.applied);
     const today = dDay(new Date()), vd = dDay(pg && pg.visitDate) || today;   // дата открытого визита, а не текущие часы
     const exams = [];
@@ -339,7 +340,7 @@
     if (!all.length) why = 'Планов лечения у пациента не найдено → консультация.';
     else if (!ortho.length) why = 'Планы есть, но без ортопедических услуг → консультация.';
     else if (!plans.length) why = 'Ортопедический план ' + ortho.map(nm).join(', ') + ' — флажок «План принят в лечение» не стоит → консультация.';
-    else if (pending.length) why = 'План ' + pending.map(nm).join(', ') + ' принят в лечение, записи с планом ещё не было → обследование и план.';
+    else if (pending.length) why = 'План ' + pending.map(nm).join(', ') + ' принят в лечение, записи с планом ещё не было → обследование и план.' + (pending.some(noItems) ? ' Состав плана страница пока не отдала.' : '');
     else why = 'План ' + plans.map(nm).join(', ') + ' принят, но уже записан в дневнике от ' + fmtD(Math.max(...exams)) + ' → консультация. Если нужно записать план заново — смените блок вручную.';
     why += ' (визит от ' + fmtD(vd) + ')';
     return { plans, pending, ready: pending.length > 0, why };
@@ -1399,6 +1400,8 @@
       check: (b, blocks, pg) => {
         const out = [];
         if (!(pg && pg.formula)) out.push({ lvl: 'warn', text: 'Ортопедия: формула SQNS не найдена — статус зубов не будет заполнен' });
+        const selP = ((pg && pg.plans) || []).filter((x) => (b.params.plans || []).includes(String(x.id)));
+        if (selP.some((x) => !(x.treatmentPlanItems || []).length)) out.push({ lvl: 'bad', text: 'Состав плана не загружен: откройте план в разделе «План лечения», закройте его и нажмите ↻ вверху панели' });
         const M = b.miss || {}, L = { remove: 'снятие конструкций', removePost: 'извлечение штифтов / вкладок', prepExt: 'удаление', prepImp: 'имплантация', prepCaries: 'лечение кариеса', prepEndo: 'эндодонтия' };
         Object.keys(L).forEach((k) => { const n = (b.params[k] || []).length, q = (b.missQty || {})[k] || 0;
           if (M[k] && !n) out.push({ lvl: 'bad', text: 'План: ' + L[k] + ' без зубов — укажите зубы в блоке «Ортопедия»' });

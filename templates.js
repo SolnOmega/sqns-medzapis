@@ -31,7 +31,8 @@
   };
   const allMini = (p) => { const r = Object.values(p.imp || {}); return r.length > 0 && r.every((x) => x.sys === 'mini'); };
   const mm = (x) => String(x).replace('.', ',');
-  const sysHint = (sys) => (b, s) => { b.hints.placed = true; b.hints.sys = b.hints.sys || {}; s.teeth.forEach((t) => { b.hints.sys[t] = sys; }); b.hints.sysDefault = sys; };
+  const sysHint = (sys) => (b, s) => { b.hints.placed = true; b.hints.sys = b.hints.sys || {}; b.hints.impTeeth = (b.hints.impTeeth || []).concat(s.teeth); b.hints.impQty = (b.hints.impQty || 0) + s.qty; s.teeth.forEach((t) => { b.hints.sys[t] = sys; }); b.hints.sysDefault = sys; };
+  const volHint = (k, v) => (b, s) => { b.hints.vol = b.hints.vol || {}; b.hints.vol[k] = (b.hints.vol[k] || 0) + v * s.qty; };
 
   // сколько каналов указано в услугах (берётся максимум) — для сверки с отмеченными каналами
   const canalHint = (b, n) => { b.hints.count = Math.max(b.hints.count || 0, +n || 0); };
@@ -39,7 +40,7 @@
 
   const SERVICE_RULES = [
     // изоляция и прокладки
-    { code: 'A02.07.001', name: /optra/i,           mod: { tpl: ['caries', 'endo', 'hygiene', 'extraction', 'implant'], key: 'isol', value: 'ретрактором OptraGate' }, label: 'Изоляция OptraGate' },
+    { code: 'A02.07.001', name: /optra/i,           mod: { tpl: ['caries', 'endo', 'hygiene', 'extraction', 'surgery'], key: 'isol', value: 'ретрактором OptraGate' }, label: 'Изоляция OptraGate' },
     { code: 'A02.07.001', name: /коффердам/i,       mod: { tpl: ['caries', 'endo'], key: 'isol', value: 'коффердамом' }, label: 'Изоляция коффердам' },
     { code: 'A16.07.002', name: /лечебн\S* прокладк/i,   mod: { tpl: ['caries', 'endo'], key: 'liner', add: 'cal' }, label: 'Лечебная прокладка' },
     { code: 'A16.07.002', name: /изолирующ\S* прокладк/i, mod: { tpl: ['caries', 'endo'], key: 'liner', add: 'gic' }, label: 'Изолирующая прокладка' },
@@ -61,23 +62,48 @@
     { code: 'A16.07.002', name: /эстетическ/i, pass: true, mod: { tpl: ['caries'], set: { resto: 'aesthetic' } }, label: 'Эстетическая реставрация' },
     { code: 'A16.07.002', name: /винир/i, unmatched: true, label: 'Композитный винир' },
     { code: 'A16.07.025.001', info: true, label: 'Полирование реставраций' },
-    // имплантация
-    { code: 'A16.07.054', name: /полный протокол/i, mod: { tpl: ['implant'], set: { guide: 'full', diag: 'full' } }, label: 'Хирургический шаблон (полный протокол)' },
-    { code: 'A16.07.054', name: /пилотн|навигац/i, mod: { tpl: ['implant'], set: { guide: 'pilot' } }, label: 'Хирургический шаблон' },
-    { code: 'A16.07.054', name: /мини/i, block: { tpl: 'implant', merge: true, mergeAll: true, qtyIsTeeth: true, params: { stage: 'place', access: 'flapless' }, hint: sysHint('mini') }, label: 'Мини-имплантат' },
-    { code: 'A16.07.054', name: /osstem/i, block: { tpl: 'implant', merge: true, mergeAll: true, qtyIsTeeth: true, params: { stage: 'place' }, hint: sysHint('osstem') }, label: 'Имплантат Osstem' },
-    { code: 'A16.07.054', name: /dentium/i, block: { tpl: 'implant', merge: true, mergeAll: true, qtyIsTeeth: true, params: { stage: 'place' }, hint: sysHint('dentium') }, label: 'Имплантат Dentium' },
-    { code: 'A16.07.054', name: /anyridge|megagen/i, block: { tpl: 'implant', merge: true, mergeAll: true, qtyIsTeeth: true, params: { stage: 'place' }, hint: sysHint('anyridge') }, label: 'Имплантат AnyRidge' },
-    { code: 'A16.07.054', name: /формировател/i, block: { tpl: 'implant', merge: true, mergeAll: true, params: { supra: 'healing' }, hint: (b) => { b.hints.healing = true; } }, label: 'Формирователь десны' },
-    { code: 'A16.07.054', name: /временн\S* а+б+атмент/i, block: { tpl: 'implant', merge: true, mergeAll: true, params: { supra: 'temp' }, hint: (b) => { b.hints.tempAbut = true; } }, label: 'Временный абатмент' },
-    { code: 'A16.07.006', name: /временн/i, block: { tpl: 'implant', merge: true, mergeAll: true, params: { supra: 'temp' }, hint: (b) => { b.hints.tempAbut = true; } }, label: 'Временный абатмент' },
-    { code: 'A16.30.026', block: { tpl: 'implant', merge: true, mergeAll: true, qtyIsTeeth: true, params: { stage: 'removal' }, hint: (b) => { b.hints.removal = true; } }, label: 'Удаление имплантата' },
+    // хирургическая операция: имплантация
+    { code: 'A16.07.054', name: /полный протокол/i, mod: { tpl: ['surgery'], set: { guide: 'full', adentia: 'full' } }, label: 'Хирургический шаблон (полный протокол)' },
+    { code: 'A16.07.054', name: /пилотн|навигац/i, mod: { tpl: ['surgery'], set: { guide: 'pilot' } }, label: 'Хирургический шаблон' },
+    { code: 'A16.07.054', name: /мини/i, block: { tpl: 'surgery', merge: true, mergeAll: true, params: { parts: ['imp'], access: 'flapless' }, hint: sysHint('mini') }, label: 'Мини-имплантат' },
+    { code: 'A16.07.054', name: /osstem/i, block: { tpl: 'surgery', merge: true, mergeAll: true, params: { parts: ['imp'] }, hint: sysHint('osstem') }, label: 'Имплантат Osstem' },
+    { code: 'A16.07.054', name: /dentium/i, block: { tpl: 'surgery', merge: true, mergeAll: true, params: { parts: ['imp'] }, hint: sysHint('dentium') }, label: 'Имплантат Dentium' },
+    { code: 'A16.07.054', name: /anyridge|megagen/i, block: { tpl: 'surgery', merge: true, mergeAll: true, params: { parts: ['imp'] }, hint: sysHint('anyridge') }, label: 'Имплантат AnyRidge' },
+    { code: 'A16.30.026', block: { tpl: 'surgery', merge: true, mergeAll: true, params: { parts: ['rem'] } }, label: 'Удаление имплантата' },
+    // ФДМ / временный абатмент (если в визите есть установка имплантатов — уходят в супраструктуру операции)
+    { code: 'A16.07.054', name: /формировател/i, block: { tpl: 'fdm', merge: true, mergeAll: true, params: { action: 'healing' } }, label: 'Формирователь десны (ФДМ)' },
+    { code: 'A16.07.054', name: /временн\S* а+б+атмент/i, block: { tpl: 'fdm', merge: true, mergeAll: true, params: { action: 'temp' } }, label: 'Временный абатмент' },
+    { code: 'A16.07.006', name: /временн/i, block: { tpl: 'fdm', merge: true, mergeAll: true, params: { action: 'temp' } }, label: 'Временный абатмент' },
+    // костная пластика: материалы
+    { code: 'A16.07.041.001', name: /bio-?oss/i, block: { tpl: 'surgery', merge: true, mergeAll: true, params: { parts: ['graft'], mats: ['biooss'] }, hint: volHint('bio', 0.5) }, label: 'Bio-Oss' },
+    { code: 'A16.07.041.001', name: /xenograft.*3[,.]0/i, block: { tpl: 'surgery', merge: true, mergeAll: true, params: { parts: ['graft'], mats: ['xeno'] }, hint: volHint('xeno', 3) }, label: 'Xenograft 3,0 см³' },
+    { code: 'A16.07.041.001', name: /xenograft.*1[,.]0/i, block: { tpl: 'surgery', merge: true, mergeAll: true, params: { parts: ['graft'], mats: ['xeno'] }, hint: volHint('xeno', 1) }, label: 'Xenograft 1,0 см³' },
+    { code: 'A16.07.041.001', name: /xenograft/i, block: { tpl: 'surgery', merge: true, mergeAll: true, params: { parts: ['graft'], mats: ['xeno'] }, hint: volHint('xeno', 0.5) }, label: 'Xenograft 0,5 см³' },
+    { code: 'A16.23.042.001', block: { tpl: 'surgery', merge: true, mergeAll: true, params: { parts: ['graft'], mats: ['auto'] } }, label: 'Аутокость' },
+    // костная пластика: мембраны и фиксация
+    { code: 'A16.07.041.001', name: /bio-?gu?ide/i, block: { tpl: 'surgery', merge: true, mergeAll: true, params: { parts: ['graft'], mems: ['biogide'] } }, label: 'Мембрана Bio-Gide' },
+    { code: 'A16.07.041.001', name: /contur/i, block: { tpl: 'surgery', merge: true, mergeAll: true, params: { parts: ['graft'], mems: ['contur'] } }, label: 'Мембрана Bioplate Contur' },
+    { code: 'A16.07.041.001', name: /биопласт/i, block: { tpl: 'surgery', merge: true, mergeAll: true, params: { parts: ['graft'], mems: ['bioplast'] } }, label: 'Мембрана Биопласт-Дент' },
+    { code: 'A16.07.041', name: /титанов/i, block: { tpl: 'surgery', merge: true, mergeAll: true, params: { parts: ['graft'], mems: ['mesh'] } }, label: 'Титановая сетка' },
+    { code: 'A16.07.041', name: /нерезорбир/i, block: { tpl: 'surgery', merge: true, mergeAll: true, params: { parts: ['graft'], mems: ['ptfe'] } }, label: 'Нерезорбируемая мембрана' },
+    { code: 'A16.07.041', name: /винт/i, block: { tpl: 'surgery', merge: true, mergeAll: true, params: { parts: ['graft'] }, hint: (b, s) => { b.hints.screws = (b.hints.screws || 0) + s.qty; } }, label: 'Фиксирующий винт' },
+    { code: 'A16.07.041', name: /пин/i, block: { tpl: 'surgery', merge: true, mergeAll: true, params: { parts: ['graft'] }, hint: (b, s) => { b.hints.pins = (b.hints.pins || 0) + s.qty; } }, label: 'Фиксирующий пин' },
+    // костная пластика: методы
+    { code: 'A16.07.041', name: /при установке/i, block: { tpl: 'surgery', merge: true, mergeAll: true, params: { parts: ['graft'], methods: ['gbr'] }, hint: (b, s) => { b.hints.graftTeeth = (b.hints.graftTeeth || []).concat(s.teeth); } }, label: 'НКР одномоментно с имплантацией' },
+    { code: 'A16.07.041', name: /1 зуба/i, block: { tpl: 'surgery', merge: true, mergeAll: true, params: { parts: ['graft'], methods: ['gbr'] }, hint: (b, s) => { b.hints.graftTeeth = (b.hints.graftTeeth || []).concat(s.teeth); } }, label: 'Костная пластика (НКР)' },
+    { code: 'A16.07.055', name: /открыт/i, block: { tpl: 'surgery', merge: true, mergeAll: true, params: { parts: ['graft'], methods: ['sinusOpen'] } }, label: 'Открытый синус-лифтинг' },
+    { code: 'A16.07.055', block: { tpl: 'surgery', merge: true, mergeAll: true, params: { parts: ['graft'], methods: ['sinusClosed'] } }, label: 'Закрытый синус-лифтинг' },
+    // мягкие ткани (в операции / при ФДМ / отдельно)
+    { code: 'A16.07.089', block: { tpl: 'soft', merge: true, mergeAll: true, params: { softM: ['gingivo'] } }, label: 'Гингивопластика' },
+    { code: 'A16.30.058', block: { tpl: 'soft', merge: true, mergeAll: true, params: { softM: ['sct'] } }, label: 'ССТ (соединительнотканный трансплантат)' },
+    { code: 'A16.07.026', name: /коагуляц/i, block: { tpl: 'soft', merge: true, mergeAll: true, params: { softM: ['diathermo'] } }, label: 'Диатермокоагуляция сосочка' },
+    { code: 'A16.07.026', name: /удлинени/i, block: { tpl: 'soft', merge: true, mergeAll: true, params: { softM: ['crownLen'] } }, label: 'Удлинение клинической коронки' },
     // удаление зубов, швы, PRF
     { code: 'A16.07.001.003', pass: true, mod: { tpl: ['extraction'], set: { method: 'complex' } }, label: 'Удаление сложное' },
     { code: 'A16.07.024', pass: true, mod: { tpl: ['extraction'], set: { method: 'impacted', flap: true, mkb: 'K01.1' } }, label: 'Удаление ретенир./дистопир.' },
-    { code: 'A16.07.097', name: /ptfe/i, mod: { tpl: ['extraction', 'implant'], set: { sutures: true, sutMat: 'PTFE' } }, label: 'Швы PTFE' },
-    { code: 'A16.07.097', mod: { tpl: ['extraction', 'implant'], set: { sutures: true } }, label: 'Швы' },
-    { code: 'A11.12.009', mod: { tpl: ['extraction', 'implant'], set: { socket: 'prf', prf: true } }, label: 'PRF' },
+    { code: 'A16.07.097', name: /ptfe/i, mod: { tpl: ['extraction', 'surgery', 'fdm', 'soft'], set: { sutures: true, sutMat: 'PTFE' } }, label: 'Швы PTFE' },
+    { code: 'A16.07.097', mod: { tpl: ['extraction', 'surgery', 'fdm', 'soft'], set: { sutures: true } }, label: 'Швы' },
+    { code: 'A11.12.009', mod: { tpl: ['extraction', 'surgery'], set: { socket: 'prf', prf: true } }, label: 'PRF' },
     // герметизация, ICON, фторирование
     { code: 'A16.07.057', block: { tpl: 'prevent', merge: true, mergeBy: 'method', qtyIsTeeth: true, params: { method: 'seal' } }, label: 'Герметизация фиссур' },
     { code: 'A16.07.002', name: /icon/i, block: { tpl: 'prevent', merge: true, mergeBy: 'method', qtyIsTeeth: true, params: { method: 'icon' } }, label: 'ICON' },
@@ -151,6 +177,176 @@
     { key: 'rinse', label: 'Полоскания', type: 'seg', options: [opt('', 'Нет')].concat(Object.keys(RX.rinse).map((k) => opt(k, RX.rinse[k].l))), default: '', show: cond },
   ];
   const rxText = (p) => { const a = []; if (p.rxPain) a.push(RX.pain); if (p.rxAbx && RX.abx[p.abx]) a.push(RX.abx[p.abx].t); if (p.rinse && RX.rinse[p.rinse]) a.push(RX.rinse[p.rinse].t); const x = a.join(' '); return x ? 'Назначено: ' + x.charAt(0).toLowerCase() + x.slice(1) : ''; };
+
+
+  // ---------- хирургия: общие тексты ----------
+  const K081 = ['K08.1', 'K08.1 Потеря зубов вследствие несчастного случая, удаления или локальной периодонтальной болезни'];
+  const K082 = ['K08.2', 'K08.2 Атрофия беззубого альвеолярного края'];
+  const has = (p, x) => (p.parts || []).includes(x);
+  const sinus = (p) => (p.methods || []).some((m) => m === 'sinusOpen' || m === 'sinusClosed');
+  const EXT_DIAG = [
+    opt('K04.5', 'K04.5 Хр. апикальный периодонтит', { mkb: ['K04.5', 'K04.5 Хронический апикальный периодонтит'], dn: 'Хронический апикальный периодонтит', st: 'разрушена', xr: 'очаг деструкции костной ткани в области верхушки корня' }),
+    opt('K08.3', 'K08.3 Оставшийся корень зуба', { mkb: ['K08.3', 'K08.3 Оставшийся корень зуба'], dn: 'Оставшийся корень', st: 'отсутствует, корень ниже уровня десны', xr: 'корень зуба, периапикальные изменения' }),
+    opt('K05.3', 'K05.3 Хронический пародонтит', { mkb: ['K05.3', 'K05.3 Хронический пародонтит'], dn: 'Хронический пародонтит в области', st: 'сохранна', xr: 'резорбция костной ткани в области корня' }),
+    opt('K03.8', 'K03.8 Перелом / трещина корня', { mkb: ['K03.8', 'K03.8 Другие уточненные болезни твердых тканей зубов'], dn: 'Вертикальный перелом корня', st: 'сохранна, подвижность фрагментов', xr: 'линия перелома корня' }),
+  ];
+  const MEMBRANES = [
+    { v: 'biogide', l: 'Bio-Gide', t: 'резорбируемой коллагеновой мембраной Bio-Gide' },
+    { v: 'contur', l: 'Bioplate Contur', t: 'мембраной Bioplate Contur' },
+    { v: 'bioplast', l: 'Биопласт-Дент', t: 'мембраной «Биопласт-Дент»' },
+    { v: 'ptfe', l: 'Нерезорбируемая (PTFE)', t: 'нерезорбируемой мембраной PTFE' },
+    { v: 'mesh', l: 'Титановая сетка', t: 'титановой сеткой' },
+    { v: 'prf', l: 'PRF', t: 'фибриновыми мембранами PRF' },
+  ];
+  const memT = (v) => (MEMBRANES.find((m) => m.v === v) || { t: '' }).t;
+  const plural = (n, one, few, many) => { const a = n % 10, b = n % 100; return a === 1 && b !== 11 ? one : a >= 2 && a <= 4 && (b < 12 || b > 14) ? few : many; };
+  const tgen = (arr) => { const f = (arr || []).slice().sort().map(fmtTooth); return f.length ? (f.length === 1 ? 'зуба ' : 'зубов ') + f.join(', ') : '___'; };
+  function softText(m, T) {
+    const t = [];
+    if ((m || []).includes('sct')) t.push('Забор соединительнотканного трансплантата с нёба, ушивание донорской зоны. Формирование расщеплённого лоскута в области ' + T.gen + ', фиксация соединительнотканного трансплантата.');
+    if ((m || []).includes('gingivo')) t.push('Гингивопластика в области ' + T.gen + ': формирование десневого контура.');
+    return t;
+  }
+  function matText(p) {
+    const a = [], m = p.mats || [];
+    if (m.includes('auto')) a.push('аутокость (забор ' + ({ harvester: 'костным харвестером', scraper: 'костным скребком', site: 'из лунки и ложа имплантата' }[p.autoM] || '') + ')');
+    if (m.includes('biooss')) a.push('Bio-Oss' + (p.volBio ? ' ' + p.volBio + ' см³' : ''));
+    if (m.includes('xeno')) a.push('Xenograft ' + p.xenoType + (p.volXeno ? ' ' + p.volXeno + ' см³' : ''));
+    if (!a.length) return '';
+    return (a.length > 1 ? 'смесь: ' : '') + a.join(' + ');
+  }
+  function surgeryText(p, T, P, X) {
+    const b = X.b, t = [], r = [], meth = p.methods || [], mems = p.mems || [];
+    const ext = has(p, 'ext'), imp = has(p, 'imp'), graft = has(p, 'graft'), rem = has(p, 'rem');
+    const extT = (p.extTeeth || []).slice().sort(), impT = (p.impTeeth || []).slice().sort();
+    const immediate = imp && ext && impT.some((x) => extT.includes(x));
+    const mat = graft ? matText(p) : '';
+    const M = 'костнопластическим материалом' + (mat ? ' (' + mat + ')' : '');
+    let matUsed = false; const useM = () => { if (matUsed) return 'костнопластическим материалом'; matUsed = true; return M; };
+    const D = P.extDiag;
+    // диагноз
+    const dg = [];
+    if (ext) dg.push(D.dn + ' ' + tgen(extT) + ', ' + D.mkb[0]);
+    if (imp || rem) dg.push((p.adentia === 'full' ? 'Полная' : 'Частичная') + ' вторичная адентия' + (ext ? '' : ': отсутствие ' + tgen(imp ? impT : b.teeth)) + ', K08.1');
+    if (graft && (!ext || meth.some((x) => x !== 'socket'))) dg.push('Атрофия альвеолярного гребня в области ' + T.gen + ', K08.2');
+    const R = { diagnosis: dg.join('; ') + '.' };
+    // жалобы, анамнез, статус
+    if (ext) {
+      R.complaints = { 'K04.5': 'Жалобы на дискомфорт при накусывании в области ' + tgen(extT) + '.', 'K08.3': 'Жалобы на разрушение ' + tgen(extT) + '.', 'K05.3': 'Жалобы на подвижность ' + tgen(extT) + '.', 'K03.8': 'Жалобы на боль при накусывании в области ' + tgen(extT) + '.' }[p.extDiag] + (imp ? ' Желает восстановить зуб с помощью имплантации.' : '');
+      R.anamnesisMorbi = 'Ранее ' + (extT.length > 1 ? 'зубы' : 'зуб') + ' лечен(ы). Проведено обследование, КЛКТ. Планируется удаление' + (imp ? ' с одномоментной имплантацией' : graft ? ' с сохранением лунки' : '') + '.';
+      R.statusLocalis = 'Коронковая часть ' + tgen(extT) + ' ' + D.st + '. Слизистая оболочка в области ' + tgen(extT) + ' без выраженных изменений.' + (imp && b.teeth.length > extT.length ? ' Дефект зубного ряда в области ' + tgen(b.teeth.filter((x) => !extT.includes(x))) + '.' : '');
+      R.xray = 'По данным КЛКТ в области ' + tgen(extT) + ': ' + D.xr + (imp ? '; объём костной ткани достаточен для немедленной имплантации' : '') + '.';
+    } else {
+      R.complaints = 'Жалобы на отсутствие ' + T.gen + ', затруднённое пережёвывание пищи.' + (graft && !imp ? ' Направлен на костную пластику для последующей имплантации.' : '');
+      R.anamnesisMorbi = (T.Nom + ' удален(ы) ранее.').replace(/^Зуб /, 'Зуб ') + ' Проведено обследование, КЛКТ.' + (imp ? ' Планируется дентальная имплантация' + (graft ? ' с костной пластикой' : '') + '.' : graft ? ' Планируется костная пластика.' : '');
+      R.statusLocalis = 'Дефект зубного ряда в области ' + T.gen + '. Слизистая оболочка альвеолярного гребня бледно-розовая, без признаков воспаления.' + (graft ? ' Альвеолярный гребень атрофирован.' : ' Ширина альвеолярного гребня достаточная.');
+      R.xray = 'По данным КЛКТ: ' + (sinus(p) ? 'недостаточная высота костной ткани под дном верхнечелюстной пазухи в области ' + T.gen : graft ? 'атрофия альвеолярного гребня в области ' + T.gen : 'объём костной ткани в области ' + T.gen + ' достаточен для установки имплантатов') + '.';
+    }
+    if (rem && !imp && !ext) { R.complaints = 'Жалобы на подвижность (дискомфорт) в области имплантата ' + T.gen + '.'; R.statusLocalis = 'В области имплантата ' + T.gen + ' слизистая оболочка гиперемирована, отёчна.'; }
+    // ход операции
+    if (p.prf) t.push('Забор венозной крови из периферической вены, изготовление фибриновых сгустков и мембран методом PRF.');
+    if (p.isol) t.push('Изоляция ' + p.isol + '.');
+    if (p.guide && imp) t.push('Установка и фиксация хирургического шаблона' + (p.guide === 'full' ? ' (полный протокол)' : ' (пилотный / навигационный)') + '.');
+    if (p.access === 'flap') t.push('Разрез по гребню альвеолярного отростка' + (meth.includes('sinusOpen') || meth.includes('gbr') ? ' с вертикальными послабляющими разрезами' : '') + ', отслаивание слизисто-надкостничного лоскута.');
+    else t.push('Трансгингивальный доступ без отслаивания лоскута.');
+    if (ext) t.push((p.extMethod === 'complex' ? 'Удаление ' + tgen(extT) + ' с разъединением корней' : 'Атравматичное удаление ' + tgen(extT)) + ' (синдесмотомия, периотомы, элеватор, щипцы). Ревизия и кюретаж ' + (extT.length > 1 ? 'лунок' : 'лунки') + ', антисептическая обработка.');
+    if (rem) t.push('Удаление имплантата в области ' + T.gen + ', кюретаж ложа, антисептическая обработка.');
+    if (graft && (p.mats || []).includes('auto')) t.push('Забор аутокости ' + ({ harvester: 'костным харвестером', scraper: 'костным скребком', site: 'из лунки и ложа имплантата' }[p.autoM] || '') + '.');
+    if (graft && meth.includes('sinusOpen')) t.push('Формирование трепанационного окна в латеральной стенке верхнечелюстной пазухи, отслаивание и элевация мембраны Шнайдера.');
+    if (graft && meth.includes('split')) t.push('Продольная остеотомия и расщепление альвеолярного гребня ' + p.splitTool + ', расширение гребня.');
+    const perfT = p.perf === 'yes' ? 'Выявлена перфорация мембраны Шнайдера' + (p.perfCover ? ', перфорация укрыта ' + (p.perfCover === 'prf' ? 'PRF-мембраной' : memT(p.perfCover)) : '') + '.' : 'Проба Вальсальвы отрицательная, перфорации мембраны Шнайдера нет.';
+    if (graft && meth.includes('sinusOpen')) t.push(perfT);
+    if (graft && meth.includes('sinusOpen')) t.push('Субантральное пространство заполнено ' + useM() + '.');
+    if (imp) {
+      const many = impT.length > 1;
+      t.push('Формирование ложа ' + (many ? 'под имплантаты' : 'под имплантат') + ' по протоколу системы' + (p.guide ? ' через хирургический шаблон' : '') + ' с охлаждением физиологическим раствором.');
+      if (graft && meth.includes('sinusClosed')) { t.push('Закрытый синус-лифтинг через ложе имплантата: элевация дна верхнечелюстной пазухи ' + p.closedTool + '. ' + (meth.includes('sinusOpen') ? '' : perfT + ' ') + 'Внесение ' + (matUsed ? 'костнопластического материала' : 'костнопластического материала' + (mat ? ' (' + mat + ')' : '')) + ' субантрально.'); matUsed = true; }
+      const rows = impT.map((x) => {
+        const rr = (p.imp || {})[x] || {}, Sy = IMPLANT_SYSTEMS[rr.sys] || { name: '___' };
+        return 'в позицию ' + fmtTooth(x) + (extT.includes(x) ? ' (в лунку удалённого зуба)' : '') + ' — ' + (rr.sys === 'mini' ? 'мини-имплантат' : 'имплантат ' + Sy.name) + ' Ø' + (rr.d ? mm(rr.d) : '___') + '×' + (rr.l ? mm(rr.l) : '___') + ' мм' + (rr.tq ? ', торк ' + rr.tq + ' Н·см' : '') + (rr.lot ? ', LOT ' + rr.lot : '');
+      });
+      t.push('Установлен' + (many ? 'ы' : '') + (immediate ? ' (немедленная имплантация)' : '') + ': ' + rows.join('; ') + '.');
+    }
+    if (graft) {
+      if (meth.includes('socket') && ext) { const sockT = extT.filter((x) => !impT.includes(x) || !imp); if (sockT.length) t.push('Сохранение ' + (sockT.length > 1 ? 'лунок' : 'лунки') + ' ' + tgen(sockT) + ': ' + (sockT.length > 1 ? 'лунки заполнены ' : 'лунка заполнена ') + useM() + '.'); }
+      if (immediate) t.push('Зазор между имплантатом и стенками лунки заполнен ' + useM() + '.');
+      if (meth.includes('split')) t.push('Пространство между кортикальными пластинками заполнено ' + useM() + '.');
+      if (meth.includes('gbr')) t.push('Направленная костная регенерация в области ' + T.gen + (imp ? ' (одномоментно с имплантацией)' : '') + ': декортикация, укладка ' + (matUsed ? 'костнопластического материала' : 'костнопластического материала' + (mat ? ' (' + mat + ')' : '')) + ' в область дефекта.'), matUsed = true;
+      if (!matUsed && mat) t.push('Использован ' + M + '.');
+      if (mems.length) {
+        t.push('Укрытие ' + (meth.includes('sinusOpen') ? 'трепанационного окна и ' : '') + 'области аугментации ' + mems.map(memT).join(' и ') + '.');
+        const fx = [];
+        if (+p.pins) fx.push(p.pins + ' ' + plural(+p.pins, 'пином', 'пинами', 'пинами'));
+        if (+p.screws) fx.push(p.screws + ' ' + plural(+p.screws, 'винтом', 'винтами', 'винтами'));
+        const subj = mems.length === 1 && mems[0] === 'mesh' ? 'Сетка' : 'Мембрана';
+        t.push(fx.length ? subj + ' фиксирована ' + fx.join(' и ') + '.' : subj + ' уложена без фиксации.');
+      } else if (+p.screws) t.push('Фиксация ' + p.screws + ' ' + plural(+p.screws, 'винтом', 'винтами', 'винтами') + '.');
+      const lots = []; if (p.lotMat) lots.push('LOT материала: ' + p.lotMat); if (p.lotMem) lots.push('LOT мембраны: ' + p.lotMem);
+      if (lots.length) t.push(lots.join('; ') + '.');
+    }
+    if (imp && !allMini(p)) { const many = impT.length > 1;
+      t.push({ cover: 'Установлен' + (many ? 'ы винты-заглушки' : ' винт-заглушка') + '.', healing: 'Установлен' + (many ? 'ы формирователи' : ' формирователь') + ' десны.',
+        temp: 'Установлен' + (many ? 'ы временные абатменты' : ' временный абатмент') + '.', tempCrown: 'Установлен' + (many ? 'ы временные абатменты' : ' временный абатмент') + ', фиксирована временная коронка, выведена из окклюзии.' }[p.supra]); }
+    if (p.prf && !mems.includes('prf')) t.push('Фибриновые сгустки PRF уложены в область вмешательства.');
+    if (has(p, 'soft')) softText(p.softM, T).forEach((x) => t.push(x));
+    if (graft && p.periost && p.access === 'flap' && ['gbr', 'split', 'sinusOpen'].some((m) => meth.includes(m))) t.push('Послабляющий разрез надкостницы, мобилизация лоскута для ушивания без натяжения.');
+    if (p.sutures) t.push((p.access === 'flap' ? 'Лоскут уложен без натяжения, наложены швы' : 'Наложены швы') + ' (' + p.sutMat + ').');
+    t.push('Гемостаз достигнут.');
+    // рекомендации
+    r.push('Холод на область операции в первые сутки по 15 минут с перерывами.', 'Не принимать пищу 2 часа, исключить горячую и твёрдую пищу, не жевать на стороне операции.',
+      'Не курить, не употреблять алкоголь, исключить физические нагрузки, баню и сауну в течение 2 недель.', 'Тщательная гигиена полости рта, область операции не чистить щёткой до снятия швов.');
+    if (graft && sinus(p)) r.push('В течение 2–3 недель не сморкаться, не чихать с закрытым ртом, не пользоваться трубочкой, не летать на самолёте и не нырять.');
+    if (imp && p.supra === 'tempCrown') r.push('Не нагружать временную коронку, пища мягкой консистенции.');
+    if (p.sutures && p.sutMat !== 'кетгут') r.push('Снятие швов через 10–14 дней.');
+    if (graft && (mems.includes('mesh') || mems.includes('ptfe'))) r.push('Снятие ' + (mems.includes('mesh') ? 'титановой сетки' : 'нерезорбируемой мембраны') + ' через 4–6 месяцев.');
+    if (graft && !imp) r.push('Установка имплантатов через ' + (meth.includes('sinusOpen') ? '6–9' : '4–6') + ' месяцев после костной пластики.');
+    r.push('Контрольный осмотр через 7–10 дней.');
+    const rx = rxText(p); const nasal = graft && sinus(p) && p.rxNasal ? ' Сосудосуживающие капли в нос 2–3 раза в день в течение 5–7 дней.' : '';
+    if (rx || nasal) r.push((rx || 'Назначено:') + nasal);
+    r.push('При кровотечении, нарастании отёка или повышении температуры — обратиться в клинику.');
+    R.treatment = t.join(' '); R.recommendations = r.join(' ');
+    return R;
+  }
+
+  // ---------- поглощение блоков: удаление/ФДМ/мягкие ткани внутри операции ----------
+  function postBuild(blocks, E) {
+    const surg = blocks.find((b) => b.tpl === 'surgery');
+    const overlap = (a, b) => !a.teeth.length || !b.teeth.length || a.teeth.some((t) => b.teeth.includes(t));
+    if (surg) {
+      blocks.filter((b) => b.tpl === 'extraction' && overlap(b, surg)).forEach((x) => {
+        surg.params.parts = [...new Set((surg.params.parts || []).concat('ext'))]; surg.auto.parts = 1;
+        surg.hints.extTeeth = (surg.hints.extTeeth || []).concat(x.teeth);
+        surg.params.extTeeth = [...new Set((surg.params.extTeeth || []).concat(x.teeth))].sort(); surg.auto.extTeeth = 1;
+        surg.teeth = [...new Set(surg.teeth.concat(x.teeth))].sort();
+        if (EXT_DIAG.some((o) => o.v === x.params.mkb)) { surg.params.extDiag = x.params.mkb; }
+        if (x.params.method === 'complex') surg.params.extMethod = 'complex';
+        if (x.params.isol) surg.params.isol = x.params.isol;
+        if (x.params.socket === 'prf') surg.params.prf = true;
+        if (x.params.sutures) { surg.params.sutures = true; surg.auto.sutures = 1; if (x.auto.sutMat) surg.params.sutMat = x.params.sutMat; }
+        blocks.splice(blocks.indexOf(x), 1);
+      });
+      blocks.filter((b) => b.tpl === 'fdm').forEach((x) => {
+        if (has(surg.params, 'imp')) { surg.params.supra = x.params.action; surg.auto.supra = 1; blocks.splice(blocks.indexOf(x), 1); }
+      });
+      blocks.filter((b) => b.tpl === 'soft' && overlap(b, surg)).forEach((x) => {
+        const sm = (x.params.softM || []).filter((m) => m === 'sct' || m === 'gingivo');
+        if (!sm.length) return;
+        surg.params.parts = [...new Set((surg.params.parts || []).concat('soft'))];
+        surg.params.softM = [...new Set((surg.params.softM || []).concat(sm))]; surg.auto.softM = 1;
+        x.params.softM = (x.params.softM || []).filter((m) => !sm.includes(m));
+        if (!x.params.softM.length) blocks.splice(blocks.indexOf(x), 1);
+      });
+      if (surg.teeth.length) { const t = E.tplById('surgery'); if (t.onTeeth) t.onTeeth(surg); }
+    }
+    const fdm = blocks.find((b) => b.tpl === 'fdm');
+    if (fdm) blocks.filter((b) => b.tpl === 'soft' && overlap(b, fdm)).forEach((x) => {
+      const sm = (x.params.softM || []).filter((m) => m === 'sct' || m === 'gingivo');
+      if (!sm.length) return;
+      fdm.params.softM = [...new Set((fdm.params.softM || []).concat(sm))]; fdm.auto.softM = 1;
+      x.params.softM = x.params.softM.filter((m) => !sm.includes(m));
+      if (!x.params.softM.length) blocks.splice(blocks.indexOf(x), 1);
+    });
+  }
 
   const TEMPLATES = [
     {
@@ -630,13 +826,18 @@
       },
     },
     {
-      id: 'implant', title: 'Имплантация', icon: '🔩', position: 'surgeon', order: 45, needTeeth: true, qtyIsTeeth: true,
+      id: 'surgery', title: 'Хирургическая операция', icon: '🔩', position: 'surgeon', order: 45, needTeeth: true,
       params: [
-        { key: 'stage', label: 'Этап', type: 'seg', options: [opt('place', 'Установка имплантатов'), opt('uncover', 'Формирователь (2 этап)'), opt('abut', 'Временный абатмент'), opt('removal', 'Удаление имплантата')], default: 'place' },
-        { key: 'diag', label: 'Диагноз', type: 'seg', options: [opt('partial', 'Частичная адентия'), opt('full', 'Полная адентия')], default: 'partial' },
-        { key: 'guide', label: 'Хирургический шаблон', type: 'seg', options: [opt('', 'Нет'), opt('pilot', 'Пилотный / навигационный'), opt('full', 'Полный протокол')], default: '', show: (p) => p.stage === 'place' },
-        { key: 'access', label: 'Доступ', type: 'seg', options: [opt('flap', 'Разрез, лоскут'), opt('flapless', 'Трансгингивально')], default: 'flap', show: (p) => p.stage === 'place' },
-        { key: 'imp', label: 'Имплантаты', type: 'perTooth', show: (p) => p.stage === 'place',
+        { key: 'parts', label: 'Состав', type: 'chips', options: [opt('ext', 'Удаление зуба'), opt('imp', 'Имплантация'), opt('graft', 'Костная пластика'), opt('soft', 'Мягкие ткани'), opt('rem', 'Удаление имплантата')], default: ['imp'] },
+        { key: 'access', label: 'Доступ', type: 'seg', options: [opt('flap', 'Разрез, лоскут'), opt('flapless', 'Трансгингивально')], default: 'flap' },
+        { key: 'guide', label: 'Хирургический шаблон', type: 'seg', options: [opt('', 'Нет'), opt('pilot', 'Пилотный / навигационный'), opt('full', 'Полный протокол')], default: '', show: (p) => has(p, 'imp') },
+        { key: 'h1', label: 'Удаление зуба', type: 'heading', show: (p) => has(p, 'ext') },
+        { key: 'extTeeth', label: 'Удаляемые зубы', type: 'teethSub', show: (p) => has(p, 'ext') },
+        { key: 'extDiag', label: 'Диагноз зуба', type: 'select', options: EXT_DIAG, show: (p) => has(p, 'ext') },
+        { key: 'extMethod', label: 'Удаление', type: 'seg', options: [opt('simple', 'Атравматичное'), opt('complex', 'С разъединением корней')], default: 'simple', show: (p) => has(p, 'ext') },
+        { key: 'h2', label: 'Имплантация', type: 'heading', show: (p) => has(p, 'imp') },
+        { key: 'impTeeth', label: 'Позиции имплантатов', type: 'teethSub', show: (p) => has(p, 'imp') },
+        { key: 'imp', label: 'Имплантаты', type: 'perTooth', show: (p) => has(p, 'imp'), rowsFor: (b) => (b.params.impTeeth || []).slice().sort(), emptyHint: 'отметьте позиции имплантатов',
           init: (b, t) => ({ sys: (b.hints.sys && b.hints.sys[t]) || b.hints.sysDefault || b.params.sysDefault || 'osstem', d: '', l: '', tq: '30', lot: '' }),
           fields: [
             { key: 'sys', label: 'Система', options: () => Object.keys(IMPLANT_SYSTEMS).map((k) => ({ v: k, l: IMPLANT_SYSTEMS[k].name })) },
@@ -645,92 +846,192 @@
             { key: 'tq', label: 'Торк', optional: true, options: () => ['15', '20', '25', '30', '35', '40', '45', '50'].map((x) => ({ v: x, l: x + ' Н·см' })) },
             { key: 'lot', label: 'LOT', type: 'text', optional: true, placeholder: 'необяз.' },
           ] },
-        { key: 'supra', label: 'Супраструктура', type: 'seg', options: [opt('cover', 'Винт-заглушка'), opt('healing', 'Формирователь'), opt('temp', 'Временный абатмент'), opt('tempCrown', 'Абатмент + врем. коронка')], default: 'cover', show: (p) => (p.stage === 'place' && !allMini(p)) || p.stage === 'abut' },
-        { key: 'prf', label: 'PRF', type: 'toggle', default: false, show: (p) => p.stage === 'place', adv: true },
-        { key: 'sutures', label: 'Швы', type: 'toggle', default: true, show: (p) => p.stage !== 'abut' },
-        { key: 'sutMat', label: 'Шовный материал', type: 'seg', options: [opt('кетгут', 'Кетгут'), opt('еврокрил', 'Еврокрил'), opt('PTFE')], default: 'еврокрил', show: (p) => p.sutures && p.stage !== 'abut' },
-        ...rxParams((p) => p.stage === 'place' || p.stage === 'removal'),
+        { key: 'supra', label: 'Супраструктура', type: 'seg', options: [opt('cover', 'Винт-заглушка'), opt('healing', 'ФДМ'), opt('temp', 'Временный абатмент'), opt('tempCrown', 'Абатмент + врем. коронка')], default: 'cover', show: (p) => has(p, 'imp') && !allMini(p) },
+        { key: 'adentia', label: 'Адентия', type: 'seg', options: [opt('partial', 'Частичная'), opt('full', 'Полная')], default: 'partial', show: (p) => has(p, 'imp') && !has(p, 'ext'), adv: true },
+        { key: 'h3', label: 'Костная пластика', type: 'heading', show: (p) => has(p, 'graft') },
+        { key: 'methods', label: 'Метод пластики', type: 'chips', options: [opt('gbr', 'НКР'), opt('socket', 'Сохранение лунки'), opt('split', 'Расщепление гребня'), opt('sinusOpen', 'Открытый синус-лифтинг'), opt('sinusClosed', 'Закрытый синус-лифтинг')], default: [], show: (p) => has(p, 'graft') },
+        { key: 'mats', label: 'Костный материал', type: 'chips', options: [opt('biooss', 'Bio-Oss'), opt('xeno', 'Xenograft'), opt('auto', 'Аутокость')], default: [], show: (p) => has(p, 'graft') },
+        { key: 'xenoType', label: 'Xenograft', type: 'seg', options: [opt('Mineral'), opt('Cortical')], default: 'Mineral', show: (p) => has(p, 'graft') && (p.mats || []).includes('xeno') },
+        { key: 'volBio', label: 'Объём Bio-Oss, см³', type: 'text', placeholder: 'напр. 0,5', show: (p) => has(p, 'graft') && (p.mats || []).includes('biooss') },
+        { key: 'volXeno', label: 'Объём Xenograft, см³', type: 'text', placeholder: 'напр. 1,0', show: (p) => has(p, 'graft') && (p.mats || []).includes('xeno') },
+        { key: 'autoM', label: 'Забор аутокости', type: 'seg', options: [opt('harvester', 'Харвестер', { t: 'костным харвестером' }), opt('scraper', 'Скребок', { t: 'костным скребком' }), opt('site', 'Из лунки / ложа', { t: 'из лунки и ложа имплантата' })], default: 'harvester', show: (p) => has(p, 'graft') && (p.mats || []).includes('auto') },
+        { key: 'mems', label: 'Мембрана', type: 'chips', options: MEMBRANES.map((m) => opt(m.v, m.l)), default: [], show: (p) => has(p, 'graft') },
+        { key: 'pins', label: 'Пины, шт.', type: 'number', default: 0, min: 0, max: 20, show: (p) => has(p, 'graft') },
+        { key: 'screws', label: 'Винты, шт.', type: 'number', default: 0, min: 0, max: 20, show: (p) => has(p, 'graft') },
+        { key: 'periost', label: 'Послабляющий разрез надкостницы', type: 'toggle', default: true, show: (p) => has(p, 'graft') && ['gbr', 'split', 'sinusOpen'].some((m) => (p.methods || []).includes(m)) && p.access === 'flap' },
+        { key: 'splitTool', label: 'Расщепление', type: 'seg', options: [opt('дисками'), opt('пьезохирургическим аппаратом', 'Пьезо'), opt('остеотомами')], default: 'дисками', show: (p) => has(p, 'graft') && (p.methods || []).includes('split'), adv: true },
+        { key: 'closedTool', label: 'Закрытый синус-лифтинг', type: 'seg', options: [opt('остеотомами', 'Остеотомы'), opt('крестальным набором', 'Крестальный набор')], default: 'остеотомами', show: (p) => has(p, 'graft') && (p.methods || []).includes('sinusClosed'), adv: true },
+        { key: 'perf', label: 'Перфорация мембраны Шнайдера', type: 'seg', options: [opt('no', 'Нет'), opt('yes', 'Да')], default: 'no', show: (p) => has(p, 'graft') && sinus(p) },
+        { key: 'perfCover', label: 'Перфорация укрыта', type: 'select', options: [opt('biogide', 'Bio-Gide'), opt('contur', 'Bioplate Contur'), opt('bioplast', 'Биопласт-Дент'), opt('prf', 'PRF-мембраной'), opt('', 'Не укрывалась')], default: 'biogide', show: (p) => has(p, 'graft') && sinus(p) && p.perf === 'yes' },
+        { key: 'lotMat', label: 'LOT материала', type: 'text', placeholder: 'необязательно', show: (p) => has(p, 'graft') },
+        { key: 'lotMem', label: 'LOT мембраны', type: 'text', placeholder: 'необязательно', show: (p) => has(p, 'graft') && (p.mems || []).length > 0 },
+        { key: 'h4', label: 'Мягкие ткани', type: 'heading', show: (p) => has(p, 'soft') },
+        { key: 'softM', label: 'Мягкие ткани', type: 'chips', options: [opt('sct', 'ССТ'), opt('gingivo', 'Гингивопластика')], default: [], show: (p) => has(p, 'soft') },
+        { key: 'h5', label: 'Завершение и назначения', type: 'heading' },
+        { key: 'prf', label: 'PRF', type: 'toggle', default: false },
+        { key: 'sutures', label: 'Швы', type: 'toggle', default: true },
+        { key: 'sutMat', label: 'Шовный материал', type: 'seg', options: [opt('кетгут', 'Кетгут'), opt('еврокрил', 'Еврокрил'), opt('PTFE')], default: 'еврокрил', show: (p) => p.sutures },
+        ...rxParams(() => true),
+        { key: 'rxNasal', label: 'Сосудосуживающие капли', type: 'toggle', default: true, show: (p) => has(p, 'graft') && sinus(p) },
         { key: 'isol', label: 'Изоляция', type: 'seg', options: [opt('', 'Нет'), opt('ретрактором OptraGate', 'OptraGate')], default: '', adv: true },
         { key: 'sysDefault', label: 'Система по умолчанию', type: 'select', options: [opt('osstem', 'Osstem TSIII'), opt('dentium', 'Dentium SuperLine'), opt('anyridge', 'MegaGen AnyRidge'), opt('mini', 'Мини-имплантат')], default: 'osstem', adv: true },
       ],
+      onTeeth: (b) => {
+        if (has(b.params, 'imp') && !b.touched.impTeeth) b.params.impTeeth = (b.hints.impTeeth && b.hints.impTeeth.length ? b.hints.impTeeth : b.teeth).filter((t) => b.teeth.includes(t));
+        if (has(b.params, 'ext') && !b.touched.extTeeth && !(b.params.extTeeth || []).length && b.hints.extTeeth) b.params.extTeeth = b.hints.extTeeth.filter((t) => b.teeth.includes(t));
+      },
       onParam: (b, key) => {
         if (key === 'access' && !b.touched.sutures) b.params.sutures = b.params.access === 'flap';
+        if (key === 'parts') {
+          if (has(b.params, 'imp') && !(b.params.impTeeth || []).length) b.params.impTeeth = b.teeth.slice();
+          if (has(b.params, 'ext') && !(b.params.extTeeth || []).length) b.params.extTeeth = b.teeth.slice();
+        }
         if (key === 'sysDefault') Object.keys(b.params.imp || {}).forEach((t) => { const r = b.params.imp[t]; if (!r.d) r.sys = b.params.sysDefault; });
       },
       finalize: (b) => {
-        if (b.hints.removal) { b.params.stage = 'removal'; b.auto.stage = 1; }
-        else if (!b.hints.placed && b.hints.tempAbut) { b.params.stage = 'abut'; b.auto.stage = 1; }
-        else if (!b.hints.placed && b.hints.healing) { b.params.stage = 'uncover'; b.auto.stage = 1; }
-        if ((b.params.access === 'flapless' || b.params.stage === 'uncover' || b.params.stage === 'abut') && !b.auto.sutures) b.params.sutures = false;
+        const H = b.hints;
+        if (H.impTeeth && H.impTeeth.length) { b.teeth = [...new Set(b.teeth.concat(H.impTeeth))].sort(); b.params.impTeeth = [...new Set(H.impTeeth)].sort(); }
+        if (H.graftTeeth && H.graftTeeth.length) b.teeth = [...new Set(b.teeth.concat(H.graftTeeth))].sort();
+        if (b.src === 'service' && !H.placed && !b.touched.parts) b.params.parts = (b.params.parts || []).filter((x) => x !== 'imp');
+        if (has(b.params, 'imp') && !(b.params.impTeeth || []).length) b.params.impTeeth = b.teeth.slice();
+        if (H.vol && H.vol.bio && !b.touched.volBio) { b.params.volBio = mm(H.vol.bio.toFixed(1)); b.auto.volBio = 1; }
+        if (H.vol && H.vol.xeno && !b.touched.volXeno) { b.params.volXeno = mm(H.vol.xeno.toFixed(1)); b.auto.volXeno = 1; }
+        if (H.pins) { b.params.pins = H.pins; b.auto.pins = 1; }
+        if (H.screws) { b.params.screws = H.screws; b.auto.screws = 1; }
+        if (b.params.prf && has(b.params, 'graft') && !(b.params.mems || []).includes('prf')) { b.params.mems = (b.params.mems || []).concat('prf'); b.auto.mems = 1; }
+        if (has(b.params, 'graft') && !(b.params.methods || []).length) { b.params.methods = [has(b.params, 'ext') && !has(b.params, 'imp') ? 'socket' : 'gbr']; b.auto.methods = 1; }
+        if (b.params.access === 'flapless' && !b.auto.sutures) b.params.sutures = false;
       },
       check: (b) => {
-        if (b.params.stage !== 'place') return [];
-        return b.teeth.filter((t) => { const r = (b.params.imp || {})[t]; return !r || !r.d || !r.l; })
-          .map((t) => ({ lvl: 'bad', text: 'Имплантат ' + fmtTooth(t) + ': укажите диаметр и длину' }));
-      },
-      mkb: () => ['K08.1', 'K08.1 Потеря зубов вследствие несчастного случая, удаления или локальной периодонтальной болезни'],
-      fields: (p, T, P, X) => {
-        const many = X.b.teeth.length > 1;
-        const imps = X.b.teeth.map((t) => {
-          const r = (p.imp || {})[t] || {}; const S = IMPLANT_SYSTEMS[r.sys] || { name: '___' };
-          return 'в позицию ' + fmtTooth(t) + ' — ' + (r.sys === 'mini' ? 'мини-имплантат' : 'имплантат ' + S.name) + ' Ø' + (r.d ? mm(r.d) : '___') + '×' + (r.l ? mm(r.l) : '___') + ' мм' + (r.tq ? ', торк ' + r.tq + ' Н·см' : '') + (r.lot ? ', LOT ' + r.lot : '');
-        });
-        const R = { diagnosis: (p.diag === 'full' ? 'Полная вторичная адентия' : 'Частичная вторичная адентия') + ': отсутствие ' + T.gen + ', K08.1.' };
-        const t = []; const r = [];
-        if (p.prf && p.stage === 'place') t.push('Забор венозной крови из периферической вены, изготовление фибриновых сгустков методом PRF.');
-        if (p.isol) t.push('Изоляция ' + p.isol + '.');
-        if (p.stage === 'place') {
-          R.complaints = 'Жалобы на отсутствие ' + T.gen + ', затруднённое пережёвывание пищи.';
-          R.anamnesisMorbi = T.Nom + ' удален(ы) ранее. Проведено обследование, КЛКТ. Планируется дентальная имплантация.';
-          R.statusLocalis = 'Дефект зубного ряда в области ' + T.gen + '. Слизистая оболочка альвеолярного гребня бледно-розовая, без признаков воспаления. Ширина альвеолярного гребня достаточная.';
-          R.xray = 'По данным КЛКТ: объём костной ткани в области ' + T.gen + ' достаточен для установки ' + (many ? 'имплантатов' : 'имплантата') + '.';
-          if (p.guide) t.push('Установка и фиксация хирургического шаблона' + (p.guide === 'full' ? ' (полный протокол)' : ' (пилотный / навигационный)') + '.');
-          t.push(p.access === 'flap' ? 'Разрез по гребню альвеолярного отростка, отслаивание слизисто-надкостничного лоскута.' : 'Трансгингивальный доступ без отслаивания лоскута.');
-          t.push('Формирование ложа ' + (many ? 'под имплантаты' : 'под имплантат') + ' по протоколу системы' + (p.guide ? ' через хирургический шаблон' : '') + ' с охлаждением физиологическим раствором.');
-          t.push('Установлены: ' + imps.join('; ') + '.');
-          if (!allMini(p)) t.push({ cover: 'Установлен' + (many ? 'ы винты-заглушки' : ' винт-заглушка') + '.', healing: 'Установлен' + (many ? 'ы формирователи' : ' формирователь') + ' десны.',
-            temp: 'Установлен' + (many ? 'ы временные абатменты' : ' временный абатмент') + '.', tempCrown: 'Установлен' + (many ? 'ы временные абатменты' : ' временный абатмент') + ', фиксирована временная коронка, выведена из окклюзии.' }[p.supra]);
-          if (p.prf) t.push('Фибриновые мембраны PRF уложены в область вмешательства.');
-          if (p.sutures) t.push((p.access === 'flap' ? 'Лоскут уложен, наложены швы' : 'Наложены швы') + ' (' + p.sutMat + ').');
-          t.push('Гемостаз достигнут.');
-          r.push('Холод на область операции в первые сутки по 15 минут с перерывами.', 'Не принимать пищу 2 часа, исключить горячую и твёрдую пищу, не жевать на стороне операции.',
-            'Не курить, не употреблять алкоголь, исключить физические нагрузки и тепловые процедуры в течение недели.', 'Тщательная гигиена полости рта, область операции не чистить щёткой до снятия швов.');
-          if (p.supra === 'tempCrown') r.push('Не нагружать временную коронку, пища мягкой консистенции.');
-          if (p.sutures && p.sutMat !== 'кетгут') r.push('Снятие швов через 10–14 дней.');
-          r.push('Контрольный осмотр через 7–10 дней.');
-        } else if (p.stage === 'uncover') {
-          R.complaints = 'Жалоб нет. Явился для установки ' + (many ? 'формирователей' : 'формирователя') + ' десны.';
-          R.anamnesisMorbi = 'Ранее в области ' + T.gen + ' установлен(ы) имплантат(ы). Период остеоинтеграции завершён.';
-          R.statusLocalis = 'Слизистая оболочка в области ' + T.gen + ' бледно-розовая, без признаков воспаления.';
-          t.push('Разрез слизистой оболочки над ' + (many ? 'имплантатами' : 'имплантатом') + ' в области ' + T.gen + ', удаление ' + (many ? 'винтов-заглушек' : 'винта-заглушки') + ', установка ' + (many ? 'формирователей' : 'формирователя') + ' десны.');
-          if (p.sutures) t.push('Наложены швы (' + p.sutMat + ').');
-          t.push('Гемостаз достигнут.');
-          r.push('Тщательная гигиена полости рта, аккуратная чистка в области формирователей.', 'Явка на ортопедический этап через 2 недели.');
-        } else if (p.stage === 'abut') {
-          R.complaints = 'Жалоб нет. Явился для установки ' + (many ? 'временных абатментов' : 'временного абатмента') + '.';
-          R.anamnesisMorbi = 'Ранее в области ' + T.gen + ' установлен(ы) имплантат(ы).';
-          R.statusLocalis = 'Слизистая оболочка в области ' + T.gen + ' без признаков воспаления, формирователи десны стабильны.';
-          t.push('Снятие ' + (many ? 'формирователей' : 'формирователя') + ' десны в области ' + T.gen + '. Установка ' + (many ? 'временных абатментов' : 'временного абатмента') +
-            (p.supra === 'tempCrown' ? ', фиксация временной коронки, выведена из окклюзии.' : '.'));
-          r.push('Тщательная гигиена полости рта.', p.supra === 'tempCrown' ? 'Не нагружать временную коронку, пища мягкой консистенции.' : 'Явка на следующий ортопедический этап по записи.');
-        } else {
-          R.complaints = 'Жалобы на подвижность (дискомфорт) в области имплантата ' + T.gen + '.';
-          R.anamnesisMorbi = 'Ранее в области ' + T.gen + ' установлен имплантат.';
-          R.statusLocalis = 'В области имплантата ' + T.gen + ' слизистая оболочка гиперемирована, отёчна, при пальпации болезненна.';
-          t.push('Удаление имплантата в области ' + T.gen + ': разрез, отслаивание слизисто-надкостничного лоскута, удаление имплантата, кюретаж ложа, антисептическая обработка.');
-          if (p.sutures) t.push('Наложены швы (' + p.sutMat + ').');
-          t.push('Гемостаз достигнут.');
-          r.push('Холод на область вмешательства в первые часы. Не принимать пищу 2 часа, не курить, не употреблять алкоголь.');
-          if (p.sutures && p.sutMat !== 'кетгут') r.push('Снятие швов через 7–10 дней.');
+        const p = b.params, out = [];
+        if (!(p.parts || []).length) out.push({ lvl: 'bad', text: 'Операция: выберите состав (удаление, имплантация, пластика…)' });
+        if (has(p, 'ext') && !(p.extTeeth || []).length) out.push({ lvl: 'bad', text: 'Операция: отметьте удаляемые зубы' });
+        if (has(p, 'imp')) {
+          if (!(p.impTeeth || []).length) out.push({ lvl: 'bad', text: 'Операция: отметьте позиции имплантатов' });
+          (p.impTeeth || []).forEach((t) => { const r = (p.imp || {})[t]; if (!r || !r.d || !r.l) out.push({ lvl: 'bad', text: 'Имплантат ' + fmtTooth(t) + ': укажите диаметр и длину' }); });
+          if (b.hints.impQty && (p.impTeeth || []).length && b.hints.impQty !== p.impTeeth.length) out.push({ lvl: 'warn', text: 'Имплантатов по услугам ' + b.hints.impQty + ', отмечено ' + p.impTeeth.length });
         }
-        if (p.stage === 'place' || p.stage === 'removal') { const rx = rxText(p); if (rx) r.push(rx); }
-        r.push('При кровотечении, нарастании отёка или повышении температуры — обратиться в клинику.');
-        R.treatment = t.join(' '); R.recommendations = r.join(' ');
-        return R;
+        if (has(p, 'graft')) {
+          if (!(p.methods || []).length) out.push({ lvl: 'bad', text: 'Костная пластика: выберите метод' });
+          if (!(p.mats || []).length) out.push({ lvl: 'warn', text: 'Костная пластика: не выбран костный материал' });
+          if ((p.methods || []).includes('socket') && !has(p, 'ext')) out.push({ lvl: 'warn', text: 'Сохранение лунки без удаления зуба в составе операции' });
+        }
+        return out;
+      },
+      mkb: (p, P) => (has(p, 'ext') ? P.extDiag.mkb : has(p, 'imp') || has(p, 'rem') ? K081 : K082),
+      fields: (p, T, P, X) => surgeryText(p, T, P, X),
+    },
+
+    {
+      id: 'fdm', title: 'ФДМ / 2 этап', icon: '🪛', position: 'surgeon', order: 46, needTeeth: true,
+      params: [
+        { key: 'action', label: 'Этап', type: 'seg', options: [opt('healing', 'Установка ФДМ'), opt('temp', 'Временный абатмент'), opt('tempCrown', 'Абатмент + врем. коронка')], default: 'healing' },
+        { key: 'access', label: 'Доступ', type: 'seg', options: [opt('incision', 'Разрез над имплантатом'), opt('punch', 'Мукотом (панч)'), opt('flap', 'Лоскут')], default: 'incision', show: (p) => p.action === 'healing' },
+        { key: 'remove', label: 'Снятие', type: 'chips', options: [opt('mesh', 'Титановая сетка'), opt('ptfe', 'Нерезорб. мембрана'), opt('screws', 'Винты / пины')], default: [] },
+        { key: 'softM', label: 'Мягкие ткани', type: 'chips', options: [opt('sct', 'ССТ'), opt('gingivo', 'Гингивопластика')], default: [] },
+        { key: 'sutures', label: 'Швы', type: 'toggle', default: false },
+        { key: 'sutMat', label: 'Шовный материал', type: 'seg', options: [opt('кетгут', 'Кетгут'), opt('еврокрил', 'Еврокрил'), opt('PTFE')], default: 'еврокрил', show: (p) => p.sutures },
+      ],
+      onParam: (b, key) => { if ((key === 'remove' || key === 'softM') && ((b.params.remove || []).length || (b.params.softM || []).length) && !b.touched.sutures) b.params.sutures = true; },
+      finalize: (b) => { if (((b.params.remove || []).length || (b.params.softM || []).length) && !b.auto.sutures) b.params.sutures = true; },
+      mkb: () => K081,
+      fields: (p, T) => {
+        const many = T.list.indexOf(',') > 0, t = [];
+        const rm = p.remove || [], sm = p.softM || [];
+        const open = rm.length || sm.length || p.access === 'flap';
+        if (open) t.push('Разрез, отслаивание слизисто-надкостничного лоскута в области ' + T.gen + '.');
+        else if (p.action === 'healing') t.push(p.access === 'punch' ? 'Иссечение слизистой оболочки над ' + (many ? 'имплантатами' : 'имплантатом') + ' мукотомом.' : 'Разрез слизистой оболочки над ' + (many ? 'имплантатами' : 'имплантатом') + ' в области ' + T.gen + '.');
+        if (rm.includes('mesh')) t.push('Удаление титановой сетки.');
+        if (rm.includes('ptfe')) t.push('Удаление нерезорбируемой мембраны.');
+        if (rm.includes('screws')) t.push('Удаление фиксирующих винтов (пинов).');
+        if (rm.length) t.push('Оценка регенерата: костная ткань сформирована.');
+        if (p.action === 'healing') t.push('Удаление ' + (many ? 'винтов-заглушек' : 'винта-заглушки') + ', установка ' + (many ? 'формирователей' : 'формирователя') + ' десны.');
+        else t.push('Снятие ' + (many ? 'формирователей' : 'формирователя') + ' десны, установка ' + (many ? 'временных абатментов' : 'временного абатмента') + (p.action === 'tempCrown' ? ', фиксация временной коронки, выведена из окклюзии.' : '.'));
+        softText(sm, T).forEach((x) => t.push(x));
+        if (p.sutures) t.push((open ? 'Лоскут уложен, наложены швы' : 'Наложены швы') + ' (' + p.sutMat + ').');
+        if (open || p.sutures) t.push('Гемостаз достигнут.');
+        const r = ['Тщательная гигиена полости рта, аккуратная чистка в области ' + (p.action === 'healing' ? 'формирователей' : 'временных конструкций') + '.'];
+        if (open) r.push('Холод на область вмешательства в первые часы, исключить горячую и твёрдую пищу.');
+        if (p.sutures && p.sutMat !== 'кетгут') r.push('Снятие швов через 10–14 дней.');
+        if (p.action === 'tempCrown') r.push('Не нагружать временную коронку, пища мягкой консистенции.');
+        r.push(p.action === 'healing' ? 'Явка на ортопедический этап через 2–3 недели.' : 'Явка на следующий ортопедический этап по записи.');
+        return {
+          complaints: 'Жалоб нет. Явился для ' + (p.action === 'healing' ? 'установки ' + (many ? 'формирователей' : 'формирователя') + ' десны' : 'установки ' + (many ? 'временных абатментов' : 'временного абатмента')) + '.',
+          anamnesisMorbi: 'Ранее в области ' + T.gen + ' установлен(ы) дентальные имплантаты' + (rm.length ? ' с направленной костной регенерацией' : '') + '. Период остеоинтеграции завершён.',
+          statusLocalis: 'Слизистая оболочка в области ' + T.gen + ' бледно-розовая, без признаков воспаления.' + (sm.length ? ' Недостаточный объём мягких тканей в области ' + T.gen + '.' : ''),
+          diagnosis: 'Частичная вторичная адентия: отсутствие ' + T.gen + ', K08.1.',
+          treatment: t.join(' '),
+          recommendations: r.join(' '),
+        };
       },
     },
 
+    {
+      id: 'soft', title: 'Мягкие ткани', icon: '🩹', position: 'surgeon', order: 47, needTeeth: true,
+      params: [
+        { key: 'softM', label: 'Вмешательство', type: 'chips', options: [opt('gingivo', 'Гингивопластика'), opt('sct', 'ССТ у имплантата'), opt('diathermo', 'Диатермокоагуляция сосочка'), opt('crownLen', 'Удлинение коронки')], default: [] },
+        { key: 'diag', label: 'Диагноз', type: 'select', options: [
+          opt('K06.1', 'K06.1 Гипертрофия десны', { mkb: ['K06.1', 'K06.1 Гипертрофия десны'], name: 'Гипертрофия десны' }),
+          opt('K06.0', 'K06.0 Рецессия десны', { mkb: ['K06.0', 'K06.0 Рецессия десны'], name: 'Рецессия десны' }),
+          opt('K08.1', 'K08.1 Вторичная адентия (у имплантата)', { mkb: ['K08.1', 'K08.1 Потеря зубов вследствие несчастного случая, удаления или локальной периодонтальной болезни'], name: 'Частичная вторичная адентия, дефицит мягких тканей' }),
+          opt('K08.8', 'K08.8 Другие изменения зубов', { mkb: ['K08.8', 'K08.8 Другие уточненные изменения зубов и их опорного аппарата'], name: 'Недостаточная высота клинической коронки' }),
+        ], default: 'K06.1' },
+        { key: 'sutures', label: 'Швы', type: 'toggle', default: false },
+        { key: 'sutMat', label: 'Шовный материал', type: 'seg', options: [opt('кетгут', 'Кетгут'), opt('еврокрил', 'Еврокрил'), opt('PTFE')], default: 'еврокрил', show: (p) => p.sutures },
+      ],
+      finalize: (b) => {
+        const m = b.params.softM || [];
+        if (!b.auto.diag) { if (m.includes('sct')) b.params.diag = 'K08.1'; else if (m.includes('crownLen')) b.params.diag = 'K08.8'; }
+        if ((m.includes('sct') || m.includes('gingivo') || m.includes('crownLen')) && !b.auto.sutures) b.params.sutures = true;
+      },
+      onParam: (b, key) => { if (key === 'softM' && !b.touched.sutures) b.params.sutures = (b.params.softM || []).some((x) => x !== 'diathermo'); },
+      mkb: (p, P) => P.diag.mkb,
+      fields: (p, T, P) => {
+        const m = p.softM || [], t = softText(m, T);
+        if (m.includes('diathermo')) t.push('Диатермокоагуляция гипертрофированного десневого сосочка в области ' + T.gen + '.');
+        if (m.includes('crownLen')) t.push('Удлинение клинической коронки ' + T.gen + ': гингивэктомия, отслаивание лоскута, остеотомия и остеопластика по показаниям с восстановлением биологической ширины.');
+        if (p.sutures) t.push('Наложены швы (' + p.sutMat + ').');
+        t.push('Гемостаз достигнут.');
+        const r = ['Не принимать пищу 2 часа, исключить горячую, острую и твёрдую пищу в течение 3 дней.', 'Не чистить щёткой область вмешательства до снятия швов, ротовые ванночки антисептиком.'];
+        if (m.includes('sct')) r.push('Возможен дискомфорт в области нёба (донорская зона).');
+        if (p.sutures && p.sutMat !== 'кетгут') r.push('Снятие швов через 10–14 дней.');
+        r.push('При кровотечении или нарастании отёка — обратиться в клинику.');
+        return {
+          complaints: m.includes('crownLen') ? 'Направлен на удлинение клинической коронки ' + T.gen + ' перед ортопедическим лечением.'
+            : m.includes('diathermo') ? 'Жалобы на разрастание и кровоточивость десны в области ' + T.gen + '.' : 'Жалобы на эстетический дефект десны в области ' + T.gen + '.',
+          statusLocalis: { K06_1: 'Десневой край в области ' + T.gen + ' гипертрофирован, гиперемирован, кровоточит при зондировании.' }[p.diag.replace('.', '_')] ||
+            (p.diag === 'K06.0' ? 'Рецессия десны в области ' + T.gen + '.' : p.diag === 'K08.1' ? 'Дефицит объёма мягких тканей в области имплантата ' + T.gen + '.' : 'Недостаточная высота клинической коронки ' + T.gen + ' для ортопедического лечения.'),
+          diagnosis: P.diag.name + ' в области ' + T.gen + ', ' + P.diag.mkb[0] + '.',
+          treatment: t.join(' '),
+          recommendations: r.join(' '),
+        };
+      },
+    },
+
+    {
+      id: 'postop', title: 'Послеоперационный осмотр', icon: '🩺', position: 'surgeon', order: 48, teethOptional: true,
+      params: [
+        { key: 'state', label: 'Состояние', type: 'seg', options: [opt('ok', 'Без особенностей'), opt('edema', 'Умеренный отёк')], default: 'ok' },
+        { key: 'sutOut', label: 'Снятие швов', type: 'toggle', default: true },
+        { key: 'diag', label: 'Диагноз', type: 'select', options: [
+          opt('Z48.8', 'Z48.8 Послеоперационное наблюдение', { mkb: ['Z48.8', 'Z48.8 Другой уточненный последующий хирургический уход'], name: 'Послеоперационное наблюдение' }),
+          opt('K08.1', 'K08.1 Вторичная адентия', { mkb: ['K08.1', 'K08.1 Потеря зубов вследствие несчастного случая, удаления или локальной периодонтальной болезни'], name: 'Частичная вторичная адентия' }),
+          opt('K08.2', 'K08.2 Атрофия альвеолярного края', { mkb: ['K08.2', 'K08.2 Атрофия беззубого альвеолярного края'], name: 'Атрофия беззубого альвеолярного края' }),
+        ], default: 'Z48.8' },
+      ],
+      mkb: (p, P) => P.diag.mkb,
+      fields: (p, T, P) => {
+        const at = T.has ? ' в области ' + T.gen : '';
+        return {
+          complaints: p.state === 'ok' ? 'Жалоб нет. Явился на контрольный осмотр после операции.' : 'Жалобы на умеренный отёк в области вмешательства. Явился на контрольный осмотр после операции.',
+          statusLocalis: 'Послеоперационная область' + at + (p.state === 'ok' ? ' без признаков воспаления, заживление первичным натяжением.' : ': умеренный отёк мягких тканей, без признаков нагноения, заживление первичным натяжением.') + ' Швы состоятельны.',
+          diagnosis: P.diag.name + at + ', ' + P.diag.mkb[0] + '.',
+          treatment: 'Осмотр послеоперационной области' + at + ', антисептическая обработка.' + (p.sutOut ? ' Снятие швов.' : ''),
+          recommendations: 'Тщательная гигиена полости рта.' + (p.state === 'edema' ? ' Продолжить назначенное лечение, холод при отёке.' : '') + ' Явка по записи на следующий этап лечения.',
+        };
+      },
+    },
   ];
 
-  globalThis.SQNSMZ_CONFIG = { IMPLANT_SYSTEMS, POSITIONS, POSITION_BY_CODE, SERVICE_RULES, DEFAULT_DURATION, ADMISSION_CONDITION, DIAG_DEFAULTS, fmtTooth, TEMPLATES };
+  globalThis.SQNSMZ_CONFIG = { postBuild, IMPLANT_SYSTEMS, POSITIONS, POSITION_BY_CODE, SERVICE_RULES, DEFAULT_DURATION, ADMISSION_CONDITION, DIAG_DEFAULTS, fmtTooth, TEMPLATES };
 })();

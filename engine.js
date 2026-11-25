@@ -77,6 +77,8 @@
     const p = {};
     (tpl.params || []).forEach((pr) => {
       if (pr.default !== undefined) p[pr.key] = Array.isArray(pr.default) ? pr.default.slice() : pr.default;
+      else if (pr.type === 'heading' || pr.type === 'note') return;
+      else if ((pr.type === 'select' || pr.type === 'seg') && pr.optionsFn) p[pr.key] = '';
       else if (pr.type === 'select' || pr.type === 'seg') p[pr.key] = pr.options[0].v;
       else if (pr.type === 'chips') p[pr.key] = [];
       else if (pr.type === 'perTooth') p[pr.key] = {};
@@ -86,9 +88,31 @@
     });
     return p;
   }
+  // Данные страницы SQNS: формула текущего визита, планы лечения, история визитов (только чтение)
+  let PAGE = null;
+  function readPage() {
+    const out = { formula: null, plans: [], history: null, clientID: null };
+    try {
+      const app = document.querySelector('[ng-app]') || document.documentElement;
+      const root = ng().element(app).injector().get('$rootScope');
+      let n = 0;
+      (function walk(sc) {
+        if (!sc || n++ > 5000) return;
+        if (Object.prototype.hasOwnProperty.call(sc, 'form') && sc.form && sc.form.dentalFormula && !out.formula) out.formula = sc.form.dentalFormula;
+        if (Object.prototype.hasOwnProperty.call(sc, 'treatmentPlans') && Array.isArray(sc.treatmentPlans) && !out.plans.length) out.plans = sc.treatmentPlans;
+        if (Object.prototype.hasOwnProperty.call(sc, 'caseHistory') && sc.caseHistory && !out.history) out.history = sc.caseHistory;
+        for (let c = sc.$$childHead; c; c = c.$$nextSibling) walk(c);
+      })(root);
+      if (!out.formula && out.history && out.history.visits && out.history.visits[0]) out.formula = out.history.visits[0].dentalFormula || null;
+      const pl = out.plans[0]; if (pl) out.clientID = pl.clientInfoID;
+    } catch (e) { console.warn('[Медзапись] не удалось прочитать данные страницы', e); }
+    return out;
+  }
+
   function newBlock(tplId, teeth, src) {
     const t = tplById(tplId);
     const b = { uid: uid++, tpl: tplId, teeth: (teeth || []).slice(), params: defaultParams(t), src: src || 'manual', pickerOpen: false, auto: {}, touched: {}, hints: {}, sort: 0 };
+    if (t.init) { try { t.init(b, PAGE || (PAGE = readPage())); } catch (e) { console.warn(e); } }
     if (t.onTeeth) t.onTeeth(b);
     return b;
   }
@@ -105,12 +129,13 @@
     if (tplById(b.tpl).qtyIsTeeth || (b.rule && b.rule.block && b.rule.block.qtyIsTeeth) || s.qtyIsTeeth) b.hints.teethQty = (b.hints.teethQty || 0) + s.qty;
   }
   function buildInitialState() {
+    PAGE = readPage();
     const services = getServices();
     const blocks = [newBlock('base', [], 'fixed')];
     const unmatched = [], mods = [];
     services.forEach((s) => {
-      if (POSITION_BY_CODE.some(([c]) => s.code.startsWith(c))) return;
       const rule = ruleFor(s);
+      if (POSITION_BY_CODE.some(([c]) => s.code.startsWith(c)) && !(rule && rule.block)) return;
       if (rule && rule.info) return;
       if (rule && rule.unmatched) { unmatched.push(s); return; }
       if (rule && rule.mod) { mods.push({ rule, s }); if (!rule.pass) return; }
@@ -165,8 +190,8 @@
         b.auto[m.key] = 1;
       });
     });
-    if (C.postBuild) C.postBuild(blocks, { newBlock, tplById, setParam });
-    blocks.forEach((b) => { const t = tplById(b.tpl); if (t.finalize) t.finalize(b, blocks); });
+    if (C.postBuild) C.postBuild(blocks, { newBlock, tplById, setParam, page: PAGE, services });
+    blocks.forEach((b) => { const t = tplById(b.tpl); if (t.finalize) t.finalize(b, blocks, PAGE); });
     const recPos = services.map((s) => (POSITION_BY_CODE.find(([c]) => s.code.startsWith(c)) || [])[1]).find(Boolean) || null;
     S = { services, unmatched, blocks, recPos, position: null, posTouched: false, duration: LS.get('duration', DEFAULT_DURATION), mode: 'replace', edits: {}, tab: 'diary' };
   }
@@ -199,7 +224,7 @@
     const F = {}; const diags = [];
     order.forEach((b) => {
       const tpl = tplById(b.tpl), T = teethHelper(blockTeeth(b)), P = resolvedParams(tpl, b.params);
-      const out = tpl.fields(b.params, T, P, { b, blocks: S.blocks }) || {};
+      const out = tpl.fields(b.params, T, P, { b, blocks: S.blocks, page: PAGE }) || {};
       Object.keys(out).forEach((k) => { if (out[k]) { F[k] = F[k] || []; if (!F[k].includes(out[k])) F[k].push(out[k]); } });
       if (tpl.mkb) { const m = tpl.mkb(b.params, P); if (m && !diags.some((x) => x[0] === m[0])) diags.push(m); }
     });
@@ -242,7 +267,7 @@
     const list = [];
     if (!ctx) { list.push({ lvl: 'bad', text: 'Дневник приёма не создан или не открыт визит' }); return list; }
     S.blocks.forEach((b) => { const t = tplById(b.tpl); if (t.needTeeth && !b.teeth.length) list.push({ lvl: 'bad', text: t.title + ': не выбран зуб' });
-      if (t.check) (t.check(b, S.blocks) || []).forEach((x) => list.push(x)); });
+      if (t.check) (t.check(b, S.blocks, PAGE) || []).forEach((x) => list.push(x)); });
     const pi = positionInfo();
     if (!pi.key) list.push({ lvl: 'bad', text: 'Должность: ' + pi.note });
     else if (!POSITIONS[pi.key].id) list.push({ lvl: 'warn', text: POSITIONS[pi.key].name + ': код не подтверждён — должность выберите в протоколе вручную' });
@@ -428,6 +453,7 @@
   .tsel{flex:1;width:auto;font-weight:700;font-size:14px;border:1.5px solid transparent;background:#f8fafc;padding:5px 8px;border-radius:9px;cursor:pointer}
   .tsel:hover{border-color:#c7d2fe}
   .add{display:flex;flex-wrap:wrap;gap:6px}
+  .note{font-size:12.5px;line-height:1.45;color:#1e293b;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:8px 10px}
   .subh{margin:14px 0 4px;padding-top:10px;border-top:1px solid #e2e8f0;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#6366f1;font-weight:800}
   .pt{margin:8px 0;padding:10px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc}
   .pt-h{font-size:12px;font-weight:700;color:#475569;margin-bottom:6px}
@@ -489,6 +515,9 @@
     if (pr.show && !pr.show(b.params)) return '';
     if (pr.adv && !b.showAdv && !b.auto[pr.key] && !b.touched[pr.key]) return '';
     if (pr.type === 'perTooth') return renderPerTooth(b, pr);
+    if (pr.optionsFn) pr = Object.assign({}, pr, { options: pr.optionsFn(b, PAGE) || [] });
+    if (pr.type === 'note') { const txt = pr.text(b, PAGE); return txt ? '<div class="row"><label>' + esc(pr.label) + '</label><div class="note">' + txt + '</div></div>' : ''; }
+    if (pr.optionsFn && !pr.options.length) return '<div class="row"><label>' + esc(pr.label) + '</label><div>' + badge('warn', pr.emptyHint || 'нет данных') + '</div></div>';
     if (pr.type === 'heading') return '<div class="subh">' + esc(pr.label) + '</div>';
     let ctl = '';
     if (pr.type === 'select') ctl = '<select data-p="' + id + '">' + pr.options.map((o) => '<option value="' + esc(o.v) + '"' + (o.v === v ? ' selected' : '') + '>' + esc(o.l) + '</option>').join('') + '</select>';
@@ -605,7 +634,7 @@
       const t = tplById(b.tpl);
       h += '<div class="card"><div class="ch"><span class="em">' + t.icon + '</span>' + (t.fixed ? '<span class="ti">' + esc(t.title) + '</span>' :
         '<select class="tsel" data-switch="' + b.uid + '">' + TEMPLATES.filter((x) => !x.fixed).map((x) => '<option value="' + x.id + '"' + (x.id === b.tpl ? ' selected' : '') + '>' + esc(x.title) + '</option>').join('') + '</select>') +
-        (b.src === 'service' ? badge('ok', 'из услуг') : b.src === 'fixed' ? '' : badge('warn', 'добавлен вручную')) +
+        (b.src === 'service' ? badge('ok', 'из услуг') : b.src === 'auto' ? badge('ok', b.autoNote || 'подобран автоматически') : b.src === 'fixed' ? '' : badge('warn', 'добавлен вручную')) +
         (t.fixed ? '' : '<button class="del" data-del="' + b.uid + '" title="Удалить блок">×</button>') + '</div>' +
         renderTeeth(b) + (t.params || []).map((pr) => renderParam(b, pr)).join('') + advLink(b) + '</div>';
     });

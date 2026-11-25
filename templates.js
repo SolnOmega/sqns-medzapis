@@ -62,6 +62,8 @@
     { code: 'A16.07.002', name: /эстетическ/i, pass: true, mod: { tpl: ['caries'], set: { resto: 'aesthetic' } }, label: 'Эстетическая реставрация' },
     { code: 'A16.07.002', name: /винир/i, unmatched: true, label: 'Композитный винир' },
     { code: 'A16.07.025.001', info: true, label: 'Полирование реставраций' },
+    // ортопедия
+    { code: 'B01.066.001', block: { tpl: 'orthoConsult', merge: true, mergeAll: true, params: {} }, label: 'Приём ортопеда' },
     // хирургическая операция: имплантация
     { code: 'A16.07.054', name: /полный протокол/i, mod: { tpl: ['surgery'], set: { guide: 'full', adentia: 'full' } }, label: 'Хирургический шаблон (полный протокол)' },
     { code: 'A16.07.054', name: /пилотн|навигац/i, mod: { tpl: ['surgery'], set: { guide: 'pilot' } }, label: 'Хирургический шаблон' },
@@ -309,7 +311,26 @@
   }
 
   // ---------- поглощение блоков: удаление/ФДМ/мягкие ткани внутри операции ----------
+  // ортопедия: консультация или план — по наличию свежего/принятого ортопедического плана
+  const ymd = (d) => { const x = new Date(d); return isNaN(x) ? '' : x.getFullYear() + '-' + (x.getMonth() + 1) + '-' + x.getDate(); };
+  // план считается принятым только по флажку «План принят в лечение» (applied) и если запись с планом после его даты ещё не делалась
+  const dDay = (x) => { if (!x) return 0; const m = String(x).match(/^(\d{2})\.(\d{2})\.(\d{4})/); const d = m ? new Date(+m[3], m[2] - 1, +m[1]) : new Date(x); return isNaN(d) ? 0 : new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); };
+  function orthoPlanState(pg) {
+    const plans = ((pg && pg.plans) || []).filter((p) => p.applied && (p.treatmentPlanItems || []).some(isOrthoItem));
+    const exams = [];
+    ((pg && pg.history && pg.history.visits) || []).forEach((v) => (v.journals || []).forEach((j) => {
+      if ((j.journalItems || []).some((it) => /Составлен план лечения/.test(it.content || ''))) exams.push(dDay(j.startDate || v.date || v.startDate));
+    }));
+    const pending = plans.filter((p) => { const pd = dDay(p.date || p.created_at); return !exams.some((d) => !pd || !d || d >= pd); });
+    return { plans, pending, ready: pending.length > 0 };
+  }
   function postBuild(blocks, E) {
+    const ops = orthoPlanState(E.page);
+    blocks.filter((b) => b.tpl === 'orthoConsult').forEach((b) => {
+      if (!ops.ready) return;
+      const nb = E.newBlock('orthoExam', [], 'auto'); nb.autoNote = 'есть план лечения'; blocks.splice(blocks.indexOf(b), 1, nb);
+    });
+    if (ops.ready && blocks.length === 1 && !(E.services || []).length) { const nb = E.newBlock('orthoExam', [], 'auto'); nb.autoNote = 'есть план лечения'; blocks.push(nb); }
     const surg = blocks.find((b) => b.tpl === 'surgery');
     const overlap = (a, b) => !a.teeth.length || !b.teeth.length || a.teeth.some((t) => b.teeth.includes(t));
     if (surg) {
@@ -346,6 +367,163 @@
       x.params.softM = x.params.softM.filter((m) => !sm.includes(m));
       if (!x.params.softM.length) blocks.splice(blocks.indexOf(x), 1);
     });
+  }
+
+
+  // ---------- ортопедия: чтение формулы SQNS, Кеннеди, план лечения ----------
+  const STATE_RU = { removed: 'отсутствует', artificial_crown: 'искусственная коронка', temporary_crown: 'временная коронка', stump_crown: 'культевая вкладка',
+    construct_removable: 'съёмная конструкция', construct_unremovable: 'несъёмная конструкция', bridge_intermediate: 'промежуточная часть мостовидного протеза',
+    impacted: 'ретинирован', dystopic: 'дистопирован', tartar: 'зубной камень', dental_plaque: 'зубные отложения', wedge_shaped_defect: 'клиновидный дефект',
+    caries: 'кариес', involvement_undefined_caries: 'кариес', enamel_caries: 'кариес эмали', dentin_caries: 'кариес дентина', pulp_involved_caries: 'кариес с вовлечением пульпы', caries_surface_undefined: 'кариес', secondary_caries_surface_undefined: 'вторичный кариес',
+    enamel_filling: 'пломба', dentin_filling: 'пломба', pulp_involved_filling: 'пломба', involvement_undefined_filling: 'пломба', surface_type_undefined_filling: 'пломба', initial_caries: 'начальный кариес', secondary_caries: 'вторичный кариес', sealed: 'пломба', buildup: 'билдап', indirect_restoration: 'непрямая реставрация' };
+  const ARCH = { upper: [18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28], lower: [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38] };
+  // { '26': ['artificial_crown','stump_crown'], ... } — только активные статусы постоянных зубов (любой участок)
+  function readFormula(f) {
+    const res = {}, T = (f && f.permanentTeeth) || {};
+    Object.keys(T).forEach((tk) => { const L = (T[tk] || {}).locations || {};
+      Object.keys(L).forEach((lk) => { const S2 = (L[lk] || {}).states || {};
+        Object.keys(S2).forEach((sk) => { if (S2[sk] && S2[sk].isActive) { res[tk] = res[tk] || []; if (!res[tk].includes(sk)) res[tk].push(sk); } }); }); });
+    return res;
+  }
+  const stName = (k, f) => { const n = f && f.stateNames && f.stateNames[k]; return STATE_RU[k] || (n && (n.name || n)) || k.replace(/_/g, ' '); };
+  const isImplant = (st) => st.some((x) => /implant/i.test(x));
+  const isMissing = (st) => st.includes('removed') && !isImplant(st) && !st.includes('bridge_intermediate');
+  // группы подряд идущих зубов по дуге, удовлетворяющих условию
+  function runs(jaw, cond) { const out = []; let cur = []; ARCH[jaw].forEach((t) => { if (cond(String(t))) cur.push(String(t)); else { if (cur.length) out.push(cur); cur = []; } }); if (cur.length) out.push(cur); return out; }
+  const sortT = (arr) => { const a = arr.slice(); const q = new Set(a.map((t) => String(t)[0])); return q.size === 1 ? a.sort((x, y) => +x - +y) : a; };
+  const span = (r) => { const a = sortT(r); return a.length > 1 ? fmtTooth(a[0]) + '–' + fmtTooth(a[a.length - 1]) : fmtTooth(a[0]); };
+  const listT = (arr) => sortT(arr).map(fmtTooth).join(', ');
+  // Класс по Кеннеди. Восьмёрки учитываются, только если явно отмечены в формуле (коронка, пломба и т. п.).
+  function kennedy(jaw, F) {
+    const miss = (t) => isMissing(F[t] || []);
+    const q = jaw === 'upper' ? [1, 2] : [4, 3];
+    const pos = (sd, n) => String(q[sd] * 10 + n);
+    const N7 = [1, 2, 3, 4, 5, 6, 7];
+    if (![0, 1].some((sd) => N7.some((n) => miss(pos(sd, n))))) return null;
+    if ([0, 1].every((sd) => N7.every((n) => miss(pos(sd, n))))) return { full: true };
+    const eightPresent = (sd) => { const st = F[pos(sd, 8)]; return !!st && !st.includes('removed'); };
+    const free = [0, 1].map((sd) => miss(pos(sd, 7)) && !eightPresent(sd));
+    const R = runs(jaw, (t) => +t[1] <= 7 && miss(t));
+    const fc = free.filter(Boolean).length;
+    let cls;
+    if (fc === 2) cls = 'I';
+    else if (fc === 1) cls = 'II';
+    else {
+      const cross = R.find((r) => r.includes(pos(0, 1)) && r.includes(pos(1, 1)));
+      cls = cross && R.length === 1 ? 'IV' : 'III';
+    }
+    const mod = Math.max(0, R.length - (fc === 2 ? 2 : 1));
+    return { cls, mod: cls === 'IV' ? 0 : mod, defects: R };
+  }
+  const JAW_RU = { upper: 'верхней челюсти', lower: 'нижней челюсти' };
+  function formulaText(F, f) {
+    const lines = [], used = new Set();
+    // мостовидные протезы: промежуточные части + соседние коронки
+    ['upper', 'lower'].forEach((jaw) => {
+      runs(jaw, (t) => (F[t] || []).includes('bridge_intermediate')).forEach((r) => {
+        const A = ARCH[jaw].map(String), i0 = A.indexOf(r[0]), i1 = A.indexOf(r[r.length - 1]);
+        const ab = [A[i0 - 1], A[i1 + 1]].filter((t) => t && ((F[t] || []).includes('artificial_crown') || isImplant(F[t] || [])));
+        const all = ab.concat(r).sort((a, b) => A.indexOf(a) - A.indexOf(b)); all.forEach((t) => used.add(t));
+        lines.push('мостовидный протез ' + span(all) + (ab.length ? ' (опоры ' + listT(ab) + ', промежуточная часть ' + listT(r) + ')' : ''));
+      });
+    });
+    const by = (k) => Object.keys(F).filter((t) => F[t].includes(k) && !used.has(t)).sort();
+    const miss = Object.keys(F).filter((t) => isMissing(F[t])).sort();
+    const impl = Object.keys(F).filter((t) => isImplant(F[t])).sort();
+    const st = [];
+    if (miss.length) st.push('Отсутствуют зубы: ' + miss.map(fmtTooth).join(', ') + '.');
+    if (impl.length) st.push('Имплантаты в позициях: ' + listT(impl) + '.');
+    const cons = [];
+    if (lines.length) cons.push(...lines);
+    const cs = Object.keys(F).filter((t) => F[t].includes('artificial_crown') && F[t].includes('stump_crown') && !used.has(t)).sort();
+    if (cs.length) { cons.push('искусственные коронки на культевых вкладках ' + listT(cs)); cs.forEach((t) => used.add(t)); }
+    [['artificial_crown', 'искусственные коронки'], ['temporary_crown', 'временные коронки'], ['stump_crown', 'культевые вкладки'], ['construct_unremovable', 'несъёмные конструкции'], ['construct_removable', 'съёмные конструкции в области'], ['indirect_restoration', 'непрямые реставрации']]
+      .forEach(([k, l]) => { const t = by(k); if (t.length) cons.push(l + ' ' + listT(t)); });
+    const skip = ['removed', 'artificial_crown', 'temporary_crown', 'stump_crown', 'construct_unremovable', 'construct_removable', 'indirect_restoration', 'bridge_intermediate'];
+    const other = Object.keys(F).sort().map((t) => { const x = F[t].filter((k) => !skip.includes(k) && !/implant/i.test(k)); return x.length ? fmtTooth(t) + ' — ' + x.map((k) => stName(k, f)).join(', ') : ''; }).filter(Boolean);
+    return { status: st, constructions: cons, other, missing: miss, implants: impl };
+  }
+  const ORTHO_CODES = ['A16.07.003', 'A16.07.004', 'A16.07.005', 'A16.07.006', 'A16.07.023', 'A16.07.035', 'A16.07.036', 'A16.07.049', 'A16.07.053', 'A16.07.094', 'A02.07.010', 'A23.07'];
+  const SKIP_CODES = ['B01.', 'B01.003', 'A02.07.001'];
+  const ncode = (name) => ((name || '').trim().split(/\s+/)[0] || '').replace(/[АВСЕКМНОРТХ]/g, (c) => ({ 'А': 'A', 'В': 'B', 'С': 'C', 'Е': 'E', 'К': 'K', 'М': 'M', 'Н': 'H', 'О': 'O', 'Р': 'P', 'Т': 'T', 'Х': 'X' }[c]));
+  const isOrthoItem = (it) => { const c = ncode(it.name); return ORTHO_CODES.some((x) => c.startsWith(x)) && !/хирургическ\S* шаблон|временн\S* а+б+атмент/i.test(it.name); };
+  const isSkipItem = (it) => SKIP_CODES.some((x) => ncode(it.name).startsWith(x));
+  const ORTHO_LABEL = [['A16.07.004', 'Коронка'], ['A16.07.005', 'Мостовидный протез'], ['A16.07.003', 'Восстановление'], ['A16.07.006', 'На имплантате'], ['A16.07.023', 'Полный съёмный протез'],
+    ['A16.07.035', 'Частичный съёмный протез'], ['A16.07.036', 'Бюгельный протез'], ['A02.07.010', 'Оттиски / диагностика'], ['A16.07.053', 'Снятие конструкции'], ['A16.07.094', 'Удаление штифта / вкладки'], ['A16.07.049', 'Повторная фиксация'], ['A23.07', 'Лабораторно']];
+  function itemText(it) {
+    const c = ncode(it.name); const lab = (ORTHO_LABEL.find(([k]) => c.startsWith(k)) || [0, ''])[1];
+    let inner = (it.name.match(/\((.*)\)\s*$/) || [0, ''])[1] || it.name.replace(/^\S+\s/, '');
+    inner = inner.replace(/,?\s*1\s*ед\.?/gi, '').replace(/\s*1ед\.?/gi, '').replace(/\s+/g, ' ').trim();
+    const teeth = (it.teeth || []).length ? ' — ' + it.teeth.slice().sort().map(fmtTooth).join(', ') : (it.qty > 1 ? ' ×' + it.qty : '');
+    return (lab ? lab + ' (' + inner + ')' : inner) + teeth;
+  }
+  function planText(plans, ids) {
+    const sel = plans.filter((p) => (ids || []).includes(String(p.id)));
+    const items = []; sel.forEach((p) => (p.treatmentPlanItems || []).forEach((it) => { if (it.type === 'service' || it.name) items.push(it); }));
+    const prep = items.filter((it) => !isOrthoItem(it) && !isSkipItem(it)).map((it) => { const t = (it.teeth || []).length ? ' — ' + listT(it.teeth) : ''; return it.name.replace(/^\S+\s/, '').replace(/,?\s*1\s*ед\.?/gi, '').replace(/\(\s*\)/, '').trim() + t; });
+    const orth = items.filter(isOrthoItem);
+    // мосты из плана: промежуточные части + соседние коронки того же материала
+    const out = [], usedIt = new Set();
+    orth.filter((it) => ncode(it.name).startsWith('A16.07.005') && (it.teeth || []).length).forEach((pont) => {
+      const jaw = ARCH.upper.map(String).includes(pont.teeth[0]) ? 'upper' : 'lower', A = ARCH[jaw].map(String);
+      const idx = pont.teeth.map((t) => A.indexOf(t)).sort((a, b) => a - b);
+      const ab = orth.filter((it) => ncode(it.name).startsWith('A16.07.004') && (it.teeth || []).some((t) => A.indexOf(t) === idx[0] - 1 || A.indexOf(t) === idx[idx.length - 1] + 1));
+      if (!ab.length) return;
+      const abT = []; ab.forEach((it) => { it.teeth.forEach((t) => { if (A.indexOf(t) === idx[0] - 1 || A.indexOf(t) === idx[idx.length - 1] + 1) abT.push(t); }); usedIt.add(it); });
+      usedIt.add(pont);
+      const all = abT.concat(pont.teeth).sort((a, b) => A.indexOf(a) - A.indexOf(b));
+      const inner = (nm) => ((nm.match(/\((.*)\)\s*$/) || [0, ''])[1] || '').replace(/,?\s*1\s*ед\.?/gi, '').replace(/\s*1ед\.?/gi, '').replace(/^использование промежуточной части\s*/i, '').trim();
+      out.push('Мостовидный протез ' + span(all) + ': опорные коронки ' + listT(abT) + ' (' + inner(ab[0].name) + '), промежуточная часть ' + listT(pont.teeth) + ' (' + inner(pont.name) + ')');
+    });
+    const prio = (it) => { const c = ncode(it.name); return c.startsWith('A16.07.053') || c.startsWith('A16.07.094') ? 0 : c.startsWith('A02.07.010') || c.startsWith('A23.07') ? 2 : 1; };
+    const pre = [], post = [];
+    orth.filter((it) => !usedIt.has(it)).sort((a, c) => prio(a) - prio(c)).forEach((it) => { (prio(it) === 0 ? pre : post).push(itemText(it)); });
+    out.unshift(...pre); out.push(...post.filter((x) => !pre.includes(x)));
+    return { prep, orth: out, count: sel.length };
+  }
+
+
+  const esc2 = (x) => String(x).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  let ORTHO_MKB = 'K08.1';
+  function orthoExamText(p, X) {
+    const pg = X.page || {}, f = pg.formula, F = f ? readFormula(f) : {}, d = formulaText(F, f);
+    const kU = kennedy('upper', F), kL = kennedy('lower', F);
+    const kTxt = (k, jaw) => !k ? '' : k.full ? 'Полная вторичная адентия ' + JAW_RU[jaw] : 'Частичная вторичная адентия ' + JAW_RU[jaw] + ', ' + k.cls + ' класс по Кеннеди' + (k.mod ? ', ' + k.mod + ' подкласс' : '');
+    const dg = [kTxt(kU, 'upper'), kTxt(kL, 'lower')].filter(Boolean);
+    const hasCons = d.constructions.length > 0;
+    let diag;
+    ORTHO_MKB = (p.diag === 'K08.8' || (p.diag === 'auto' && !dg.length)) ? 'K08.8' : 'K08.1';
+    if (ORTHO_MKB === 'K08.8') diag = 'Дефекты коронковой части зубов' + (hasCons ? ', несостоятельные ортопедические конструкции' : '') + ', K08.8.';
+    else diag = dg.join('; ') + ', K08.1.' + (hasCons && p.consState !== 'ok' ? ' Несостоятельные ортопедические конструкции.' : '');
+    const C = { chew: 'затруднённое пережёвывание пищи', aesth: 'эстетический дефект', missing: 'отсутствие зубов', broken: 'разрушение зубов', old: 'несостоятельность имеющихся ортопедических конструкций', removable: 'неудобство пользования съёмным протезом' };
+    const compl = (p.complaints || []).map((k) => C[k]).filter(Boolean);
+    const prevDone = p.prev === 'yes' || (p.prev === 'auto' && hasCons);
+    const st = [];
+    st.push(...d.status);
+    if (hasCons) st.push('Имеющиеся конструкции: ' + d.constructions.join('; ') + ' — ' + { ok: 'состоятельны', partial: 'частично несостоятельны', bad: 'несостоятельны, подлежат замене' }[p.consState] + '.');
+    if (d.other.length) st.push(d.other.join('; ') + '.');
+    st.push('Прикус ' + p.bite + '.');
+    st.push({ ok: 'ВНЧС: движения в суставах плавные, безболезненные.', click: 'ВНЧС: щелчок при открывании рта.', pain: 'ВНЧС: болезненность при пальпации.' }[p.tmj]);
+    st.push({ ok: 'Слизистая оболочка протезного ложа бледно-розовая, без патологических изменений.', atrophy: 'Атрофия альвеолярного гребня в области дефектов зубного ряда.', inflam: 'Слизистая оболочка протезного ложа гиперемирована.' }[p.mucosa]);
+    const plans = pg.plans || [], ids = p.plans || [];
+    const main = ids.length > 1 ? [p.mainPlan || ids[0]] : ids;
+    const P1 = planText(plans, main), others = ids.filter((x) => !main.includes(x));
+    const t = ['Консультация врача-стоматолога-ортопеда. Проведён осмотр, оценка зубной формулы, имеющихся конструкций и окклюзии.' + (p.xray ? ' Анализ рентгенограмм / КЛКТ.' : ''), 'Составлен план лечения:'];
+    if (P1.prep.length) t.push('Этап подготовки: ' + P1.prep.join('; ') + '.');
+    if (P1.orth.length) t.push('Ортопедический этап: ' + P1.orth.join('; ') + '.');
+    if (!P1.prep.length && !P1.orth.length) t.push('___');
+    if (others.length && p.variants) others.forEach((id, i) => { const V = planText(plans, [id]); const pl = plans.find((x) => String(x.id) === id) || {};
+      t.push('Альтернативный вариант ' + (i + 2) + ' («' + (pl.title || 'План') + '»): ' + V.prep.concat(V.orth).join('; ') + '.'); });
+    t.push('План лечения, сроки и стоимость согласованы с пациентом.');
+    return {
+      complaints: 'Жалобы на ' + (compl.length ? compl.join(', ') : '___') + '.',
+      anamnesisMorbi: prevDone ? 'Ранее проводилось ортопедическое лечение.' : 'Ранее ортопедическое лечение не проводилось.',
+      statusLocalis: st.join(' '),
+      xray: p.xray ? 'Рентгенологическое обследование / КЛКТ: ___' : '',
+      diagnosis: diag,
+      treatment: t.join(' '),
+      recommendations: 'Санация полости рта перед ортопедическим лечением. Явка на следующий этап по записи.',
+    };
   }
 
   const TEMPLATES = [
@@ -1031,7 +1209,84 @@
         };
       },
     },
+    {
+      id: 'orthoConsult', title: 'Ортопедия: консультация', icon: '💬', position: 'orthopedist', order: 49,
+      params: [
+        { key: 'fNote', label: 'Формула SQNS', type: 'note', text: (b, pg) => {
+          if (!pg || !pg.formula) return 'Формула не заполнена — статус будет общими словами.';
+          const F = readFormula(pg.formula), d = formulaText(F, pg.formula);
+          const parts = d.status.concat(d.constructions.length ? ['Конструкции: ' + d.constructions.join('; ') + '.'] : []);
+          return parts.length ? parts.map(esc2).join('<br>') : 'В формуле нет отметок.';
+        } },
+        { key: 'complaints', label: 'Жалобы', type: 'chips', options: [opt('chew', 'Затруднённое жевание'), opt('aesth', 'Эстетика'), opt('missing', 'Отсутствие зубов'), opt('broken', 'Разрушение зубов'), opt('old', 'Несостоятельность конструкций'), opt('removable', 'Неудобство съёмного протеза')], default: ['missing'] },
+        { key: 'useFormula', label: 'Статус из формулы', type: 'toggle', default: true },
+        { key: 'needs', label: 'Нуждается в', type: 'chips', options: [opt('fixed', 'Несъёмное протезирование'), opt('implant', 'На имплантатах'), opt('removable', 'Съёмное протезирование'), opt('replace', 'Замена конструкций'), opt('sanation', 'Предварительная санация'), opt('surgeon', 'Консультация хирурга')], default: ['fixed'] },
+        { key: 'diag', label: 'Диагноз', type: 'seg', options: [opt('auto', 'По формуле'), opt('partial', 'Частичная адентия'), opt('full', 'Полная адентия'), opt('crowns', 'Дефекты коронок')], default: 'auto' },
+      ],
+      mkb: () => (ORTHO_MKB === 'K08.8' ? ['K08.8', 'K08.8 Другие уточненные изменения зубов и их опорного аппарата'] : ['K08.1', 'K08.1 Потеря зубов вследствие несчастного случая, удаления или локальной периодонтальной болезни']),
+      fields: (p, T, P, X) => {
+        const pg = X.page || {}, f = pg.formula, F = f ? readFormula(f) : {}, d = formulaText(F, f);
+        const C = { chew: 'затруднённое пережёвывание пищи', aesth: 'эстетический дефект', missing: 'отсутствие зубов', broken: 'разрушение зубов', old: 'несостоятельность имеющихся ортопедических конструкций', removable: 'неудобство пользования съёмным протезом' };
+        const compl = (p.complaints || []).map((k) => C[k]).filter(Boolean);
+        const kU = kennedy('upper', F), kL = kennedy('lower', F);
+        const kTxt = (k, jaw) => !k ? '' : k.full ? 'Полная вторичная адентия ' + JAW_RU[jaw] : 'Частичная вторичная адентия ' + JAW_RU[jaw] + ', ' + k.cls + ' класс по Кеннеди' + (k.mod ? ', ' + k.mod + ' подкласс' : '');
+        const dgF = [kTxt(kU, 'upper'), kTxt(kL, 'lower')].filter(Boolean);
+        let diag;
+        if (p.diag === 'auto' && dgF.length) { diag = dgF.join('; ') + ', K08.1.'; ORTHO_MKB = 'K08.1'; }
+        else if (p.diag === 'crowns' || (p.diag === 'auto' && f && !d.missing.length && d.constructions.length)) { diag = 'Дефекты коронковой части зубов, K08.8.'; ORTHO_MKB = 'K08.8'; }
+        else if (p.diag === 'full') { diag = 'Полная вторичная адентия, K08.1.'; ORTHO_MKB = 'K08.1'; }
+        else { diag = 'Частичная вторичная адентия, K08.1.'; ORTHO_MKB = 'K08.1'; }
+        const st = [];
+        if (p.useFormula && f && (d.status.length || d.constructions.length)) { st.push(...d.status); if (d.constructions.length) st.push('Имеющиеся конструкции: ' + d.constructions.join('; ') + '.'); }
+        else st.push('Дефекты зубных рядов.');
+        const N = { fixed: 'несъёмном протезировании', implant: 'протезировании с опорой на имплантаты', removable: 'съёмном протезировании', replace: 'замене несостоятельных ортопедических конструкций', sanation: 'предварительной санации полости рта', surgeon: 'консультации хирурга по вопросу имплантации' };
+        const needs = (p.needs || []).map((k) => N[k]).filter(Boolean);
+        return {
+          complaints: 'Жалобы на ' + (compl.length ? compl.join(', ') : '___') + '.',
+          statusLocalis: st.join(' '),
+          diagnosis: diag,
+          treatment: 'Консультация врача-стоматолога-ортопеда. Проведён осмотр полости рта.' + (needs.length ? ' Пациент нуждается в ' + needs.join(', ') + '.' : '') +
+            ' Пациенту разъяснены возможные варианты лечения, их сроки и ориентировочная стоимость.',
+          recommendations: 'Повторная консультация для составления и согласования плана лечения.' + ((p.needs || []).includes('sanation') ? ' Санация полости рта.' : ''),
+        };
+      },
+    },
+    {
+      id: 'orthoExam', title: 'Ортопедия: обследование и план', icon: '🦷', position: 'orthopedist', order: 50,
+      params: [
+        { key: 'fNote', label: 'Формула SQNS', type: 'note', text: (b, pg) => {
+          if (!pg || !pg.formula) return '⚠️ Формула не найдена на странице — откройте визит пациента.';
+          const F = readFormula(pg.formula), d = formulaText(F, pg.formula);
+          const parts = d.status.concat(d.constructions.length ? ['Конструкции: ' + d.constructions.join('; ') + '.'] : []).concat(d.other.length ? ['Прочее: ' + d.other.join('; ') + '.'] : []);
+          const kt = (k) => (!k ? '—' : k.full ? 'полная адентия' : k.cls + (k.mod ? ', подкласс ' + k.mod : ''));
+          const kU = kennedy('upper', F), kL = kennedy('lower', F);
+          if (kU || kL) parts.push('Кеннеди: в/ч ' + kt(kU) + '; н/ч ' + kt(kL));
+          return parts.length ? parts.map(esc2).join('<br>') : 'В формуле нет отметок.';
+        } },
+        { key: 'complaints', label: 'Жалобы', type: 'chips', options: [opt('chew', 'Затруднённое жевание'), opt('aesth', 'Эстетика'), opt('missing', 'Отсутствие зубов'), opt('broken', 'Разрушение зубов'), opt('old', 'Несостоятельность конструкций'), opt('removable', 'Неудобство съёмного протеза')], default: ['chew'] },
+        { key: 'prev', label: 'Ранее протезирование', type: 'seg', options: [opt('auto', 'По формуле'), opt('yes', 'Проводилось'), opt('no', 'Не проводилось')], default: 'auto' },
+        { key: 'consState', label: 'Имеющиеся конструкции', type: 'seg', options: [opt('ok', 'Состоятельны'), opt('partial', 'Частично несостоятельны'), opt('bad', 'Несостоятельны')], default: 'ok' },
+        { key: 'bite', label: 'Прикус', type: 'select', options: [opt('ортогнатический'), opt('прямой'), opt('глубокий'), opt('прогнатический'), opt('прогенический'), opt('перекрёстный'), opt('открытый'), opt('без фиксированной межальвеолярной высоты', 'Без фиксированной высоты')] },
+        { key: 'tmj', label: 'ВНЧС', type: 'seg', options: [opt('ok', 'Без особенностей'), opt('click', 'Щелчок'), opt('pain', 'Болезненность')], default: 'ok' },
+        { key: 'mucosa', label: 'Слизистая протезного ложа', type: 'seg', options: [opt('ok', 'Без патологии'), opt('atrophy', 'Атрофия гребня'), opt('inflam', 'Воспаление')], default: 'ok' },
+        { key: 'xray', label: 'Рентген / КЛКТ', type: 'toggle', default: true },
+        { key: 'h1', label: 'План лечения', type: 'heading' },
+        { key: 'plans', label: 'Планы SQNS', type: 'chips', emptyHint: 'планов лечения у пациента нет', optionsFn: (b, pg) => ((pg && pg.plans) || []).map((p) => opt(String(p.id), (p.title || 'План') + ' · ' + String(p.date || '').slice(0, 10).split('-').reverse().join('.') + (p.applied ? ' · применён' : ''))) },
+        { key: 'mainPlan', label: 'Принятый вариант', type: 'select', optionsFn: (b, pg) => ((pg && pg.plans) || []).filter((p) => (b.params.plans || []).includes(String(p.id))).map((p) => opt(String(p.id), p.title || 'План')), show: (p) => (p.plans || []).length > 1 },
+        { key: 'variants', label: 'Остальные — как варианты', type: 'toggle', default: true, show: (p) => (p.plans || []).length > 1 },
+        { key: 'diag', label: 'Диагноз', type: 'seg', options: [opt('auto', 'По формуле'), opt('K08.8', 'Дефекты коронок (K08.8)'), opt('K08.1', 'Адентия (K08.1)')], default: 'auto', adv: true },
+      ],
+      init: (b, pg) => {
+        const pl = (pg && pg.plans) || []; if (!pl.length) return;
+        const applied = pl.filter((p) => p.applied); const pick = (applied.length ? applied : [pl.slice().sort((a, c) => String(c.date).localeCompare(String(a.date)))[0]]);
+        b.params.plans = pick.map((p) => String(p.id)); b.params.mainPlan = b.params.plans[0]; b.auto.plans = 1;
+      },
+      check: (b, blocks, pg) => (!(pg && pg.formula) ? [{ lvl: 'warn', text: 'Ортопедия: формула SQNS не найдена — статус зубов не будет заполнен' }] : []),
+      mkb: () => (ORTHO_MKB === 'K08.8' ? ['K08.8', 'K08.8 Другие уточненные изменения зубов и их опорного аппарата'] : ['K08.1', 'K08.1 Потеря зубов вследствие несчастного случая, удаления или локальной периодонтальной болезни']),
+      fields: (p, T, P, X) => orthoExamText(p, X),
+    },
+
   ];
 
-  globalThis.SQNSMZ_CONFIG = { postBuild, IMPLANT_SYSTEMS, POSITIONS, POSITION_BY_CODE, SERVICE_RULES, DEFAULT_DURATION, ADMISSION_CONDITION, DIAG_DEFAULTS, fmtTooth, TEMPLATES };
+  globalThis.SQNSMZ_CONFIG = { _test: { kennedy, readFormula, formulaText, planText }, postBuild, IMPLANT_SYSTEMS, POSITIONS, POSITION_BY_CODE, SERVICE_RULES, DEFAULT_DURATION, ADMISSION_CONDITION, DIAG_DEFAULTS, fmtTooth, TEMPLATES };
 })();

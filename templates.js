@@ -316,14 +316,29 @@
   const ymd = (d) => { const x = new Date(d); return isNaN(x) ? '' : x.getFullYear() + '-' + (x.getMonth() + 1) + '-' + x.getDate(); };
   // план считается принятым только по флажку «План принят в лечение» (applied) и если запись с планом после его даты ещё не делалась
   const dDay = (x) => { if (!x) return 0; const m = String(x).match(/^(\d{2})\.(\d{2})\.(\d{4})/); const d = m ? new Date(+m[3], m[2] - 1, +m[1]) : new Date(x); return isNaN(d) ? 0 : new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); };
+  // Выбор «консультация / обследование и план»:
+  //  — нужен ортопедический план с флажком «План принят в лечение» (applied);
+  //  — записью с планом считается дневник со словами «Составлен план лечения» из ПРОШЛЫХ дней, сделанный не раньше даты плана.
+  //  Сегодняшние дневники не учитываются (это текущий визит), даты плана/визита на выбор не влияют больше ничем.
+  const fmtD = (t) => { const d = new Date(t); return ('0' + d.getDate()).slice(-2) + '.' + ('0' + (d.getMonth() + 1)).slice(-2) + '.' + d.getFullYear(); };
   function orthoPlanState(pg) {
-    const plans = ((pg && pg.plans) || []).filter((p) => p.applied && (p.treatmentPlanItems || []).some(isOrthoItem));
+    const all = (pg && pg.plans) || [];
+    const ortho = all.filter((p) => (p.treatmentPlanItems || []).some(isOrthoItem));
+    const plans = ortho.filter((p) => p.applied);
+    const today = dDay(new Date());
     const exams = [];
     ((pg && pg.history && pg.history.visits) || []).forEach((v) => (v.journals || []).forEach((j) => {
-      if ((j.journalItems || []).some((it) => /Составлен план лечения/.test(it.content || ''))) exams.push(dDay(j.startDate || v.date || v.startDate));
+      if ((j.journalItems || []).some((it) => /Составлен план лечения/.test(it.content || ''))) { const d = dDay(j.startDate || v.date || v.startDate); if (d && d < today) exams.push(d); }
     }));
-    const pending = plans.filter((p) => { const pd = dDay(p.date || p.created_at); return !exams.some((d) => !pd || !d || d >= pd); });
-    return { plans, pending, ready: pending.length > 0 };
+    const pending = plans.filter((p) => { const pd = dDay(p.date || p.created_at); return !exams.some((d) => d >= pd); });
+    const nm = (p) => '«' + (p.title || 'План') + '»' + (dDay(p.date) ? ' от ' + fmtD(dDay(p.date)) : '');
+    let why;
+    if (!all.length) why = 'Планов лечения у пациента не найдено → консультация.';
+    else if (!ortho.length) why = 'Планы есть, но без ортопедических услуг → консультация.';
+    else if (!plans.length) why = 'Ортопедический план ' + ortho.map(nm).join(', ') + ' — флажок «План принят в лечение» не стоит → консультация.';
+    else if (pending.length) why = 'План ' + pending.map(nm).join(', ') + ' принят в лечение, записи с планом ещё не было → обследование и план.';
+    else why = 'План ' + plans.map(nm).join(', ') + ' принят, но уже записан в дневнике от ' + fmtD(Math.max(...exams)) + ' → консультация. Если нужно записать план заново — смените блок вручную.';
+    return { plans, pending, ready: pending.length > 0, why };
   }
   function postBuild(blocks, E) {
     const ops = orthoPlanState(E.page);
@@ -503,6 +518,11 @@
 
   const esc2 = (x) => String(x).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
   let ORTHO_MKB = 'K08.1';
+  // Диагноз: сначала код МКБ с полным названием, Кеннеди — уточнением (по желанию)
+  function diagText(code, kenn, crownT) {
+    if (code === 'K08.8') return 'K08.8 Другие уточнённые изменения зубов и их опорного аппарата' + (crownT && crownT.length ? ': дефект коронковой части ' + (crownT.length > 1 ? 'зубов ' : 'зуба ') + listT(crownT) : ': дефекты коронковой части зубов') + '.';
+    return 'K08.1 Потеря зубов вследствие несчастного случая, удаления или локальной периодонтальной болезни.' + (kenn && kenn.length ? ' ' + kenn.map((x, i) => (i ? x.charAt(0).toLowerCase() + x.slice(1) : x)).join('; ') + '.' : '');
+  }
   function orthoExamText(p, X) {
     const pg = X.page || {}, f = pg.formula, F = f ? readFormula(f) : {}, d = formulaText(F, f);
     const kU = kennedy('upper', F), kL = kennedy('lower', F);
@@ -510,12 +530,12 @@
     const dg = [kTxt(kU, 'upper'), kTxt(kL, 'lower')].filter(Boolean);
     const hasCons = d.constructions.length > 0;
     let diag;
-    ORTHO_MKB = (p.diag === 'K08.8' || (p.diag === 'auto' && !dg.length)) ? 'K08.8' : 'K08.1';
+    ORTHO_MKB = (p.diag === 'K08.8' || (p.diag === 'auto' && f && !dg.length)) ? 'K08.8' : 'K08.1';
     const R = (p.remove || []).map(String), RP = (p.removePost || []).map(String);
     const remBad = (p.remU === 'replace' || p.remL === 'replace');
     const badCons = R.length > 0 || remBad;
-    if (ORTHO_MKB === 'K08.8') diag = 'Дефекты коронковой части зубов' + (badCons ? ', несостоятельные ортопедические конструкции' : '') + ', K08.8.';
-    else diag = dg.join('; ') + ', K08.1.' + (badCons ? ' Несостоятельные ортопедические конструкции.' : '');
+    const crownT = [...new Set(planItems(pg.plans || [], (p.plans || []).length > 1 ? [p.mainPlan || p.plans[0]] : (p.plans || [])).filter((it) => isOrthoItem(it) && !isRemoveItem(it) && !isPostItem(it)).flatMap((it) => it.teeth || []).map(String))];
+    diag = diagText(ORTHO_MKB, p.kennedy ? dg : [], crownT) + (badCons ? ' Несостоятельные ортопедические конструкции.' : '');
     const C = { chew: 'затруднённое пережёвывание пищи', aesth: 'эстетический дефект', missing: 'отсутствие зубов', broken: 'разрушение зубов', old: 'несостоятельность имеющихся ортопедических конструкций', removable: 'неудобство пользования съёмным протезом' };
     const compl = (p.complaints || []).map((k) => C[k]).filter(Boolean);
     const prevDone = p.prev === 'yes' || (p.prev === 'auto' && hasCons);
@@ -1278,6 +1298,7 @@
     {
       id: 'orthoConsult', title: 'Ортопедия: консультация', icon: '💬', position: 'orthopedist', order: 49,
       params: [
+        { key: 'why', label: 'Почему этот блок', type: 'note', text: (b, pg) => esc2(orthoPlanState(pg).why) },
         { key: 'fNote', label: 'Формула SQNS', type: 'note', text: (b, pg) => {
           if (!pg || !pg.formula) return 'Формула не заполнена — статус будет общими словами.';
           const F = readFormula(pg.formula), d = formulaText(F, pg.formula);
@@ -1289,7 +1310,8 @@
         { key: 'need', label: 'Протезирование', type: 'seg', options: [opt('yes', 'Нуждается'), opt('no', 'Не нуждается')], default: 'yes' },
         { key: 'needs', label: 'Уточнить (необязательно)', type: 'chips', options: [opt('fixed', 'Несъёмное'), opt('implant', 'На имплантатах'), opt('removable', 'Съёмное'), opt('replace', 'Замена конструкций')], default: [], show: (p) => p.need === 'yes' },
         { key: 'extra', label: 'Дополнительно', type: 'chips', options: [opt('sanation', 'Предварительная санация'), opt('surgeon', 'Консультация хирурга')], default: [], show: (p) => p.need === 'yes' },
-        { key: 'diag', label: 'Диагноз', type: 'seg', options: [opt('auto', 'По формуле'), opt('partial', 'Частичная адентия'), opt('full', 'Полная адентия'), opt('crowns', 'Дефекты коронок')], default: 'auto' },
+        { key: 'diag', label: 'Диагноз', type: 'seg', options: [opt('auto', 'По формуле'), opt('partial', 'K08.1 частичная'), opt('full', 'K08.1 полная'), opt('crowns', 'K08.8 коронки')], default: 'auto' },
+        { key: 'kennedy', label: 'Уточнение (Кеннеди)', type: 'toggle', default: true, adv: true },
       ],
       mkb: () => (ORTHO_MKB === 'K08.8' ? ['K08.8', 'K08.8 Другие уточненные изменения зубов и их опорного аппарата'] : ['K08.1', 'K08.1 Потеря зубов вследствие несчастного случая, удаления или локальной периодонтальной болезни']),
       fields: (p, T, P, X) => {
@@ -1299,11 +1321,9 @@
         const kU = kennedy('upper', F), kL = kennedy('lower', F);
         const kTxt = (k, jaw) => !k ? '' : k.full ? 'Полная вторичная адентия ' + JAW_RU[jaw] : 'Частичная вторичная адентия ' + JAW_RU[jaw] + ', ' + k.cls + ' класс по Кеннеди' + (k.mod ? ', ' + k.mod + ' подкласс' : '');
         const dgF = [kTxt(kU, 'upper'), kTxt(kL, 'lower')].filter(Boolean);
-        let diag;
-        if (p.diag === 'auto' && dgF.length) { diag = dgF.join('; ') + ', K08.1.'; ORTHO_MKB = 'K08.1'; }
-        else if (p.diag === 'crowns' || (p.diag === 'auto' && f && !d.missing.length && d.constructions.length)) { diag = 'Дефекты коронковой части зубов, K08.8.'; ORTHO_MKB = 'K08.8'; }
-        else if (p.diag === 'full') { diag = 'Полная вторичная адентия, K08.1.'; ORTHO_MKB = 'K08.1'; }
-        else { diag = 'Частичная вторичная адентия, K08.1.'; ORTHO_MKB = 'K08.1'; }
+        ORTHO_MKB = p.diag === 'crowns' || (p.diag === 'auto' && f && !dgF.length) ? 'K08.8' : 'K08.1';
+        const kenn = p.diag === 'auto' ? dgF : p.diag === 'full' ? ['Полная вторичная адентия'] : p.diag === 'partial' ? ['Частичная вторичная адентия'] : [];
+        const diag = diagText(ORTHO_MKB, p.kennedy ? kenn : [], []);
         const st = [];
         if (p.useFormula && f && (d.status.length || d.constructions.length)) { st.push(...d.status); if (d.constructions.length) st.push('Имеющиеся конструкции: ' + d.constructions.join('; ') + '.'); }
         else st.push('Дефекты зубных рядов.');
@@ -1325,6 +1345,7 @@
     {
       id: 'orthoExam', title: 'Ортопедия: обследование и план', icon: '🦷', position: 'orthopedist', order: 50,
       params: [
+        { key: 'why', label: 'Почему этот блок', type: 'note', text: (b, pg) => esc2(orthoPlanState(pg).why) },
         { key: 'fNote', label: 'Формула SQNS', type: 'note', text: (b, pg) => {
           if (!pg || !pg.formula) return '⚠️ Формула не найдена на странице — откройте визит пациента.';
           const F = readFormula(pg.formula), d = formulaText(F, pg.formula);
@@ -1355,7 +1376,8 @@
         { key: 'prepCaries', autoText: 'из плана', label: 'Терапия: лечение кариеса', type: 'toothSet', hl: (b, pg) => cariesTeeth(pg), hlText: 'кариес в формуле', need: (b) => !!(b.miss || {}).prepCaries, needText: 'в плане без зубов — укажите' },
         { key: 'prepEndo', autoText: 'из плана', label: 'Терапия: эндодонтия', type: 'toothSet', need: (b) => !!(b.miss || {}).prepEndo, needText: 'в плане без зубов — укажите' },
         { key: 'prepTherText', label: 'Терапия: прочее', type: 'text', placeholder: 'например: профессиональная гигиена' },
-        { key: 'diag', label: 'Диагноз', type: 'seg', options: [opt('auto', 'По формуле'), opt('K08.8', 'Дефекты коронок (K08.8)'), opt('K08.1', 'Адентия (K08.1)')], default: 'auto', adv: true },
+        { key: 'diag', label: 'Диагноз', type: 'seg', options: [opt('auto', 'По формуле'), opt('K08.1', 'K08.1 адентия'), opt('K08.8', 'K08.8 коронки')], default: 'auto', adv: true },
+        { key: 'kennedy', label: 'Уточнение (Кеннеди)', type: 'toggle', default: true, adv: true },
       ],
       init: (b, pg) => {
         b.pg = pg;

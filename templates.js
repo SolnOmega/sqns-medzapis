@@ -1414,5 +1414,6 @@
 
   ];
 
-  globalThis.SQNSMZ_CONFIG = { _test: { kennedy, readFormula, formulaText, planText }, postBuild, IMPLANT_SYSTEMS, POSITIONS, POSITION_BY_CODE, SERVICE_RULES, DEFAULT_DURATION, ADMISSION_CONDITION, DIAG_DEFAULTS, fmtTooth, TEMPLATES };
+  function formulaMarks(f) { const F = readFormula(f); const ks = Object.keys(F); return { missing: ks.filter((t) => !isImplant(F[t]) && (F[t].includes('removed') || F[t].includes('bridge_intermediate'))), implant: ks.filter((t) => isImplant(F[t])) }; }
+  globalThis.SQNSMZ_CONFIG = { formulaMarks, _test: { kennedy, readFormula, formulaText, planText }, postBuild, IMPLANT_SYSTEMS, POSITIONS, POSITION_BY_CODE, SERVICE_RULES, DEFAULT_DURATION, ADMISSION_CONDITION, DIAG_DEFAULTS, fmtTooth, TEMPLATES };
 })();

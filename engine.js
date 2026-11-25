@@ -495,6 +495,7 @@
   .tb:hover{border-color:#818cf8;color:#4338ca;transform:translateY(-1px)}
   .tb.on{background:linear-gradient(135deg,#0ea5a3,#6366f1);border-color:transparent;color:#fff;box-shadow:0 3px 10px rgba(79,70,229,.35)}
   .tsum{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-height:26px} .muted{color:#94a3b8;font-size:12.5px} .formula.mini{margin:6px 0 2px;padding:8px} .formula.mini .tb{height:26px;font-size:11.5px}
+  .tb.miss{background:#f1f5f9;color:#94a3b8;border-color:#e2e8f0} .tb.impl{color:#7c3aed;border-color:#ddd6fe}
   .tb.dv{border:1.5px dashed #818cf8;background:#eef2ff;color:#4338ca}
   .tb.svc::after{content:"";position:absolute;bottom:3px;left:50%;transform:translateX(-50%);width:12px;height:3px;border-radius:3px;background:#06b6d4}
   .tb.on.svc::after{background:#fff}
@@ -587,12 +588,13 @@
     else if (pr.type === 'toothSet') {
       const val = (v || []).map(String), hl = new Set(((pr.hl && pr.hl(b, PAGE)) || []).map(String)), open = (b.tsOpen || {})[pr.key];
       const need = pr.need && pr.need(b, PAGE) && !val.length;
-      const btn = (t) => { t = String(t); return '<button class="tb' + (val.includes(t) ? ' on' : hl.has(t) ? ' dv' : '') + '" data-ts="' + id + '" data-t="' + t + '">' + t + '</button>'; };
+      const M = fMarks();
+      const btn = (t) => { t = String(t); const L = tLabel(M, t); return '<button class="tb' + L.cls + (val.includes(t) ? ' on' : hl.has(t) ? ' dv' : '') + '" data-ts="' + id + '" data-t="' + t + '" title="' + t + '">' + L.txt + '</button>'; };
       const r = (a, z) => Array.from({ length: z }, (_, i) => a + i), half = (arr) => '<div class="half">' + arr.map(btn).join('') + '</div>';
       const row = (L, R) => '<div class="jaw">' + half(L) + '<div class="mid"></div>' + half(R) + '</div>';
       ctl = '<div class="tsum">' + (val.length ? '<span class="fs">' + val.slice().sort().map(fmtTooth).join(', ') + '</span>' : need ? badge('bad', pr.needText || 'укажите зубы') : '<span class="muted">не выбрано</span>') +
         ' <button class="link" data-tso="' + id + '">' + (open ? 'Свернуть' : val.length ? 'Изменить' : 'Выбрать') + '</button></div>' +
-        (open ? '<div class="formula mini">' + row(r(11, 8).reverse(), r(21, 8)) + '<div class="occl"></div>' + row(r(41, 8).reverse(), r(31, 8)) + (pr.hlText && hl.size ? '<div class="ff"><span class="hint">пунктир — ' + esc(pr.hlText) + '</span></div>' : '') + '</div>' : '');
+        (open ? '<div class="formula mini">' + row(r(11, 8).reverse(), r(21, 8)) + '<div class="occl"></div>' + row(r(41, 8).reverse(), r(31, 8)) + (pr.hlText && hl.size ? '<div class="ff"><span class="hint">пунктир — ' + esc(pr.hlText) + '</span></div>' : '') + (fCaption(M) ? '<div class="ff">' + fCaption(M) + '</div>' : '') + '</div>' : '');
     }
     else if (pr.type === 'chips') ctl = '<div class="chips">' + pr.options.map((o) => '<button data-chip="' + id + '" data-v="' + esc(o.v) + '" class="chip ' + ((v || []).includes(o.v) ? 'on' : '') + '">' + esc(o.l) + '</button>').join('') + '</div>';
     else if (pr.type === 'toggle') ctl = '<button class="tg ' + (v ? 'on' : '') + '" data-tg="' + id + '"></button>';
@@ -634,13 +636,22 @@
     return '<button class="morebtn" data-adv="' + b.uid + '">' + (b.showAdv ? '▴ Скрыть дополнительные' : '▾ Ещё параметры (' + hidden + ')') + '</button>';
   }
 
+  // Формула пациента из SQNS поверх нашей сетки: отсутствующие — «0» серым, имплантаты — «И». Выбирать их всё равно можно.
+  function fMarks() { if (S.plainFormula || !PAGE || !PAGE.formula || !C.formulaMarks) return null; try { return C.formulaMarks(PAGE.formula); } catch (e) { return null; } }
+  function tLabel(M, t) { return !M ? { txt: t, cls: '' } : M.missing.includes(t) ? { txt: '0', cls: ' miss' } : M.implant.includes(t) ? { txt: 'И', cls: ' impl' } : { txt: t, cls: '' }; }
+  function fCaption(M) {
+    if (!PAGE || !PAGE.formula || !C.formulaMarks) return '';
+    return S.plainFormula ? '<span class="hint">обычная формула · <button class="link" data-plainf="0">формула пациента</button></span>'
+      : '<span class="hint">формула из карточки пациента' + (M && (M.missing.length || M.implant.length) ? ' (0 — нет зуба, И — имплантат)' : '') + ' · <button class="link" data-plainf="1">сброс</button></span>';
+  }
   function renderTeeth(b) {
     const tpl = tplById(b.tpl);
     if (!hasFormula(tpl)) return '';
     const derived = tpl.teethFromOthers && !b.teeth.length ? blockTeeth(b) : [];
     const svcT = new Set(S.services.flatMap((s) => s.teeth));
-    const btn = (t) => { t = String(t); const on = b.teeth.includes(t), dv = !on && derived.includes(t);
-      return '<button class="tb' + (on ? ' on' : dv ? ' dv' : '') + (svcT.has(t) ? ' svc' : '') + '" data-tooth="' + b.uid + '" data-t="' + t + '">' + t + '</button>'; };
+    const M = fMarks();
+    const btn = (t) => { t = String(t); const on = b.teeth.includes(t), dv = !on && derived.includes(t), L = tLabel(M, t);
+      return '<button class="tb' + L.cls + (on ? ' on' : dv ? ' dv' : '') + (svcT.has(t) ? ' svc' : '') + '" data-tooth="' + b.uid + '" data-t="' + t + '" title="' + t + '">' + L.txt + '</button>'; };
     const half = (arr) => '<div class="half">' + arr.map(btn).join('') + '</div>';
     const r = (a, z) => Array.from({ length: z }, (_, i) => a + i);
     const row = (L, R) => '<div class="jaw">' + half(L) + '<div class="mid"></div>' + half(R) + '</div>';
@@ -654,6 +665,7 @@
       (b.teeth.length ? '<button class="link" data-clear="' + b.uid + '">Сбросить</button>' : '') + '</div>' +
       row(r(11, 8).reverse(), r(21, 8)) + '<div class="occl"></div>' + row(r(41, 8).reverse(), r(31, 8)) +
       (S.showMilk ? '<div class="milk">' + row([55, 54, 53, 52, 51, 0, 0, 0].filter(Boolean), r(61, 5)) + '<div class="occl"></div>' + row([85, 84, 83, 82, 81], r(71, 5)) + '</div>' : '') +
+      (fCaption(M) ? '<div class="ff">' + fCaption(M) + '</div>' : '') +
       '<div class="ff"><button class="link" data-milk="1">' + (S.showMilk ? 'Скрыть молочные' : 'Молочные зубы') + '</button>' +
       (svcT.size ? '<span class="hint"><span class="sdot"></span> зуб есть в услугах</span>' : '') + '</div></div>';
   }
@@ -680,11 +692,11 @@
     h += '<div class="sec"><h2>Шаблоны</h2><div class="card">' +
       (userBlocks.length ? '' : '<div class="hint" style="margin:0 0 8px">Шаблон не выбран — услуги не распознаны или их ещё нет. Выберите вручную:</div>') +
       '<div class="tiles">' + TEMPLATES.filter((t) => !t.fixed).map((t) => {
-        const bs = userBlocks.filter((b) => b.tpl === t.id), n = bs.length, auto = bs.some((b) => b.src === 'service');
+        const bs = userBlocks.filter((b) => b.tpl === t.id), n = bs.length, auto = bs.some((b) => b.src === 'service'), byPlan = bs.some((b) => b.src === 'auto');
         return '<button class="tile' + (n ? ' on' : '') + '" data-add="' + t.id + '" title="Добавить блок «' + esc(t.title) + '»">' +
           '<span class="ti-ic">' + t.icon + '</span><span class="ti-t">' + esc(t.title) + '</span>' +
           (n ? '<span class="ti-n">' + (n > 1 ? '×' + n : '✓') + '</span>' : '<span class="ti-p">＋</span>') +
-          (n ? '<span class="ti-s">' + (auto ? 'из услуг' : 'вручную') + '</span>' : '') + '</button>';
+          (n ? '<span class="ti-s">' + (auto ? 'из услуг' : byPlan ? 'по плану' : 'вручную') + '</span>' : '') + '</button>';
       }).join('') + '</div><div class="hint" style="margin-top:6px">Нажмите, чтобы добавить блок. Сменить шаблон блока — в его заголовке, удалить — ×.</div></div></div>';
 
     // Услуги визита
@@ -793,6 +805,7 @@
     });
     on('[data-adv]', 'click', (e) => { const b = S.blocks.find((x) => x.uid === +e.currentTarget.dataset.adv); b.showAdv = !b.showAdv; render(); });
     on('[data-milk]', 'click', () => { S.showMilk = !S.showMilk; render(); });
+    on('[data-plainf]', 'click', (e) => { S.plainFormula = e.currentTarget.dataset.plainf === '1'; render(); });
     on('[data-clear]', 'click', (e) => { const b = S.blocks.find((x) => x.uid === +e.currentTarget.dataset.clear); b.teeth = []; if (tplById(b.tpl).onTeeth) tplById(b.tpl).onTeeth(b); render(); });
     on('[data-del]', 'click', (e) => { S.blocks = S.blocks.filter((x) => x.uid !== +e.currentTarget.dataset.del); render(); });
     on('[data-add]', 'click', (e) => { const b = newBlock(e.currentTarget.dataset.add, [], 'manual'); S.blocks.push(b); render();

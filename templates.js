@@ -637,7 +637,7 @@
         { key: 'guide', label: 'Хирургический шаблон', type: 'seg', options: [opt('', 'Нет'), opt('pilot', 'Пилотный / навигационный'), opt('full', 'Полный протокол')], default: '', show: (p) => p.stage === 'place' },
         { key: 'access', label: 'Доступ', type: 'seg', options: [opt('flap', 'Разрез, лоскут'), opt('flapless', 'Трансгингивально')], default: 'flap', show: (p) => p.stage === 'place' },
         { key: 'imp', label: 'Имплантаты', type: 'perTooth', show: (p) => p.stage === 'place',
-          init: (b, t) => ({ sys: (b.hints.sys && b.hints.sys[t]) || b.hints.sysDefault || b.params.sysDefault || 'osstem', d: '', l: '', tq: '', lot: '' }),
+          init: (b, t) => ({ sys: (b.hints.sys && b.hints.sys[t]) || b.hints.sysDefault || b.params.sysDefault || 'osstem', d: '', l: '', tq: '30', lot: '' }),
           fields: [
             { key: 'sys', label: 'Система', options: () => Object.keys(IMPLANT_SYSTEMS).map((k) => ({ v: k, l: IMPLANT_SYSTEMS[k].name })) },
             { key: 'd', label: 'Диаметр', options: (r) => (r.sys && IMPLANT_SYSTEMS[r.sys] ? Object.keys(IMPLANT_SYSTEMS[r.sys].sizes).map((d) => ({ v: d, l: 'Ø ' + mm(d) })) : []) },

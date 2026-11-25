@@ -155,6 +155,7 @@
           const fm = sc.form; out.formula = fm.dentalFormula; out.visitId = fm.id || fm.visitID || null;
           const jd = (fm.journals || []).map((j) => j.startDate).filter(Boolean);
           out.visitDate = jd[0] || fm.date || fm.startDate || fm.visitDate || fm.datetime || fm.start || null;
+          out.visitJournals = fm.journals || [];
         }
         if (Object.prototype.hasOwnProperty.call(sc, 'treatmentPlans') && Array.isArray(sc.treatmentPlans) && !out.plans.length) out.plans = sc.treatmentPlans;
         if (Object.prototype.hasOwnProperty.call(sc, 'caseHistory') && sc.caseHistory && !out.history) out.history = sc.caseHistory;
@@ -164,7 +165,10 @@
       const pl = out.plans[0]; if (pl) out.clientID = pl.clientInfoID;
       out.plans = out.plans.map((p) => (!(p.treatmentPlanItems || []).length && PLAN_ITEMS[p.id] ? Object.assign({}, p, { treatmentPlanItems: PLAN_ITEMS[p.id], _loaded: true }) : p));
       ensurePlanItems(out.plans);
-      if (!out.visitDate) { const c = getCtx(); if (c && c.j) out.visitDate = c.j.startDate; }
+      const cx = getCtx();
+      if (!out.visitDate && cx && cx.j) out.visitDate = cx.j.startDate;
+      // другие дневники этого же визита (например, план записан в первом, а сейчас открыт второй)
+      out.otherJournals = (out.visitJournals || []).filter((j) => !(cx && cx.j === j));
     } catch (e) { console.warn('[Медзапись] не удалось прочитать данные страницы', e); }
     return out;
   }
@@ -421,6 +425,7 @@
   }
 
   async function createDiary() {
+    const before = getCtx(), oldJ = before && before.j, oldN = before && before.sc && before.sc.form && before.sc.form.journals ? before.sc.form.journals.length : 0;
     const btn = document.querySelector('.case-history-journal-add__button');
     if (!btn) return toast('Кнопка «Дневник приема» не найдена — откройте визит', 'bad');
     btn.click();
@@ -432,8 +437,16 @@
     if (submit) submit.click();
     const ok = await waitFor('[ng-controller="JournalItemController"]', 8000);
     if (!ok) return toast('Дневник не появился', 'bad');
+    if (oldJ) {   // второй и следующие дневники: ждём, пока откроется новый
+      const t0 = Date.now(); let c = getCtx();
+      while (Date.now() - t0 < 8000 && c && c.j === oldJ) { await sleep(200); c = getCtx(); }
+      const n = c && c.sc && c.sc.form && c.sc.form.journals ? c.sc.form.journals.length : 0;
+      if (c && c.j === oldJ) { toast(n > oldN ? 'Новый дневник создан — откройте его и нажмите ↻' : 'Новый дневник не появился', n > oldN ? 'warn' : 'bad'); return; }
+    }
     await sleep(400);
+    undoSnap = null;
     buildInitialState(); render();
+    toast('Новый дневник создан' + (oldJ ? ' — блоки подобраны заново' : ''));
   }
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -756,6 +769,7 @@
     if (iss.length) h += '<div class="sec"><h2>Проверка</h2><div class="iss">' + iss.map((i) => '<div class="' + i.lvl + '">' + (i.lvl === 'bad' ? '⛔' : '⚠️') + ' ' + esc(i.text) + '</div>').join('') + '</div></div>';
 
     h += '</div><div class="ft">' + (undoSnap ? '<button class="btn sec2" id="undo">↶ Отменить вставку</button>' : '') +
+      (ctx ? '<button class="btn sec2" id="mkdiary2" title="Добавить ещё один дневник приёма в этот визит">＋ Ещё дневник</button>' : '') +
       '<button class="btn pri" id="insert"' + (hasBad ? ' disabled title="Исправьте пункты с ⛔"' : '') + '>Вставить в визит</button></div>';
 
     P.innerHTML = h; bind(P);
@@ -778,6 +792,7 @@
     const q = (id) => P.querySelector('#' + id);
     if (q('close')) q('close').onclick = closePanel;
     if (q('mkdiary')) q('mkdiary').onclick = createDiary;
+    if (q('mkdiary2')) q('mkdiary2').onclick = createDiary;
     if (q('rescan')) q('rescan').onclick = () => { buildInitialState(); render(); };
     if (q('refresh')) q('refresh').onclick = () => { buildInitialState(); render(); toast('Данные страницы перечитаны'); };
     if (q('insert')) q('insert').onclick = doInsert;

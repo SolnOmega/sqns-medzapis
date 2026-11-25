@@ -63,7 +63,7 @@
     { code: 'A16.07.002', name: /винир/i, unmatched: true, label: 'Композитный винир' },
     { code: 'A16.07.025.001', info: true, label: 'Полирование реставраций' },
     // ортопедия
-    { code: 'B01.066.001', block: { tpl: 'orthoConsult', merge: true, mergeAll: true, params: {} }, label: 'Приём ортопеда' },
+    { code: 'B01.066', block: { tpl: 'orthoConsult', merge: true, mergeAll: true, params: {} }, label: 'Приём ортопеда' },
     // хирургическая операция: имплантация
     { code: 'A16.07.054', name: /полный протокол/i, mod: { tpl: ['surgery'], set: { guide: 'full', adentia: 'full' } }, label: 'Хирургический шаблон (полный протокол)' },
     { code: 'A16.07.054', name: /пилотн|навигац/i, mod: { tpl: ['surgery'], set: { guide: 'pilot' } }, label: 'Хирургический шаблон' },
@@ -334,6 +334,7 @@
         if ((j.journalItems || []).some((it) => /Составлен план лечения/.test(it.content || ''))) { const d = dDay(j.startDate || v.date || v.startDate); if (d && d < vd) exams.push(d); }
       });
     });
+    ((pg && pg.otherJournals) || []).forEach((j) => { if ((j.journalItems || []).some((it) => /Составлен план лечения/.test(it.content || ''))) exams.push(vd); });
     const pending = plans.filter((p) => { const pd = dDay(p.date || p.created_at); return !exams.some((d) => d >= pd); });
     const nm = (p) => '«' + (p.title || 'План') + '»' + (dDay(p.date) ? ' от ' + fmtD(dDay(p.date)) : '');
     let why;
@@ -341,17 +342,30 @@
     else if (!ortho.length) why = 'Планы есть, но без ортопедических услуг → консультация.';
     else if (!plans.length) why = 'Ортопедический план ' + ortho.map(nm).join(', ') + ' — флажок «План принят в лечение» не стоит → консультация.';
     else if (pending.length) why = 'План ' + pending.map(nm).join(', ') + ' принят в лечение, записи с планом ещё не было → обследование и план.' + (pending.some(noItems) ? ' Состав плана страница пока не отдала.' : '');
-    else why = 'План ' + plans.map(nm).join(', ') + ' принят, но уже записан в дневнике от ' + fmtD(Math.max(...exams)) + ' → консультация. Если нужно записать план заново — смените блок вручную.';
+    else why = 'План ' + plans.map(nm).join(', ') + ' принят и уже записан в дневнике от ' + fmtD(Math.max(...exams)) + ' → этапы лечения. Если нужно записать план заново — смените блок вручную.';
     why += ' (визит от ' + fmtD(vd) + ')';
     return { plans, pending, ready: pending.length > 0, why };
   }
   function postBuild(blocks, E) {
     const ops = orthoPlanState(E.page);
+    // этапы: принятый план уже записан → блоки «Ортопедия: этап» по маршрутам плана
+    const stageBlocks = () => {
+      const RR = detectRoutes(E.page), avail = ROUTE_ORDER.filter((r) => RR[r]); if (!avail.length) return [];
+      const st = {}; avail.forEach((r) => { st[r] = routeStatus(r, E.page); });
+      let rs = avail.filter((r) => st[r].started && !st[r].finished);
+      if (!rs.length) { const f = avail.find((r) => !st[r].finished); if (f) rs = [f]; }
+      if (rs.includes('fixed') && st.fixed.suggest.includes('fix')) { const rem = ['removable', 'complete'].find((r) => RR[r] && !st[r].started); if (rem && !rs.includes(rem)) rs.push(rem); }
+      return rs.map((r) => { const nb = E.newBlock('orthoStage', [], 'auto'); nb.autoNote = 'по плану и истории'; nb.svcNames = (E.services || []).map((x) => x.name); stageInit(nb, E.page, r); return nb; });
+    };
+    const wantStage = !ops.ready && ops.plans.length > 0;
     blocks.filter((b) => b.tpl === 'orthoConsult').forEach((b) => {
-      if (!ops.ready) return;
-      const nb = E.newBlock('orthoExam', [], 'auto'); nb.autoNote = 'есть план лечения'; blocks.splice(blocks.indexOf(b), 1, nb);
+      if (ops.ready) { const nb = E.newBlock('orthoExam', [], 'auto'); nb.autoNote = 'есть план лечения'; blocks.splice(blocks.indexOf(b), 1, nb); return; }
+      if (wantStage) { const sb = stageBlocks(); if (sb.length) blocks.splice(blocks.indexOf(b), 1, ...sb); }
     });
-    if (ops.ready && blocks.length === 1 && !(E.services || []).length) { const nb = E.newBlock('orthoExam', [], 'auto'); nb.autoNote = 'есть план лечения'; blocks.push(nb); }
+    if (blocks.length === 1 && !(E.services || []).length) {
+      if (ops.ready) { const nb = E.newBlock('orthoExam', [], 'auto'); nb.autoNote = 'есть план лечения'; blocks.push(nb); }
+      else if (wantStage) blocks.push(...stageBlocks());
+    }
     const surg = blocks.find((b) => b.tpl === 'surgery');
     const overlap = (a, b) => !a.teeth.length || !b.teeth.length || a.teeth.some((t) => b.teeth.includes(t));
     if (surg) {
@@ -595,6 +609,288 @@
       diagnosis: diag,
       treatment: t.join(' '),
       recommendations: (prepParts.length ? 'Подготовка полости рта согласно плану лечения перед ортопедическим этапом. ' : '') + 'Явка на следующий этап по записи.',
+    };
+  }
+
+  // ===================== ОРТОПЕДИЯ: ЭТАПЫ ЛЕЧЕНИЯ =====================
+  // Маршрут (вид конструкции) берётся из принятого плана, пройденные этапы — из строк «Этап лечения (…): …» прошлых дневников.
+  const ROUTES = {
+    fixed: { label: 'несъёмное протезирование', title: 'Коронки / мосты' },
+    implant: { label: 'протезирование на имплантатах', title: 'Коронки на имплантатах' },
+    veneer: { label: 'виниры', title: 'Виниры' },
+    removable: { label: 'частичное съёмное протезирование', title: 'Частичный съёмный / бюгельный' },
+    complete: { label: 'полное съёмное протезирование', title: 'Полный съёмный' },
+    implRem: { label: 'съёмное протезирование на имплантатах', title: 'Съёмный / условно-съёмный на имплантатах' },
+  };
+  const ROUTE_ORDER = ['fixed', 'implant', 'veneer', 'removable', 'complete', 'implRem'];
+  // opt — необязательный этап (не предлагается сам); with — этапы, которые обычно идут в тот же визит
+  const STAGES = {
+    fixed: [
+      { id: 'remove', t: 'снятие несостоятельных конструкций', opt: true },
+      { id: 'tempImp', t: 'оттиски для временных коронок', opt: true },
+      { id: 'postLab', t: 'изготовление культевой вкладки', need: (R) => R.posts === 'lab' || R.posts === 'direct' },
+      { id: 'postFix', t: 'фиксация культевой вкладки', need: (R) => R.posts === 'lab' || R.posts === 'direct', with: ['prep'] },
+      { id: 'fiber', t: 'восстановление культи на стекловолоконном штифте', need: (R) => R.posts === 'fiber', with: ['prep'] },
+      { id: 'prep', t: 'препарирование, временные коронки' },
+      { id: 'imp', t: 'оттиски (сканирование) под постоянные конструкции' },
+      { id: 'bite', t: 'определение прикуса', opt: true },
+      { id: 'fix', t: 'припасовка и фиксация постоянных конструкций', final: true },
+    ],
+    implant: [
+      { id: 'iImp', t: 'оттиски (сканирование) с уровня имплантатов' },
+      { id: 'bite', t: 'определение прикуса', opt: true },
+      { id: 'iFix', t: 'фиксация коронок на имплантатах', final: true },
+    ],
+    veneer: [
+      { id: 'vDiag', t: 'диагностические оттиски для wax-up' },
+      { id: 'vMock', t: 'mock-up' },
+      { id: 'vPrep', t: 'препарирование под виниры' },
+      { id: 'vFix', t: 'фиксация виниров', final: true },
+    ],
+    removable: [
+      { id: 'rImp', t: 'анатомические оттиски' },
+      { id: 'rBite', t: 'определение центральной окклюзии' },
+      { id: 'rTry', t: 'примерка конструкции' },
+      { id: 'rFix', t: 'наложение протеза', final: true },
+    ],
+    complete: [
+      { id: 'cPre', t: 'оттиски для индивидуальных ложек' },
+      { id: 'cImp', t: 'функциональные оттиски' },
+      { id: 'cBite', t: 'определение центрального соотношения' },
+      { id: 'cTry', t: 'примерка конструкции' },
+      { id: 'cFix', t: 'наложение протеза', final: true },
+    ],
+    implRem: [
+      { id: 'irPre', t: 'оттиски для индивидуальной ложки', opt: true },
+      { id: 'irImp', t: 'оттиски (сканирование) с уровня имплантатов' },
+      { id: 'bite', t: 'определение прикуса', opt: true },
+      { id: 'irTry', t: 'примерка конструкции' },
+      { id: 'irFix', t: 'фиксация (наложение) конструкции', final: true },
+    ],
+  };
+
+  // ---- маршруты из позиций плана ----
+  function routeOf(it) {
+    const c = ncode(it.name), n = it.name || '';
+    if (/коррекци|перебазир|очистк|починк|матриц|лабораторный этап|хирургическ\S* шаблон|снятие и установка|обслуживани/i.test(n)) return '';
+    if (c.startsWith('A16.07.006')) {
+      if (/полным несъемн|балк|шарик|o-ring|ретенцион/i.test(n)) return 'implRem';
+      if (/коронк/i.test(n) && !/временн/i.test(n)) return 'implant';
+      return '';
+    }
+    if (c.startsWith('A16.07.023') || /полного протеза/i.test(n)) return /имплант|балоч|шаровид|all-on|условно/i.test(n) ? 'implRem' : 'complete';
+    if (c.startsWith('A16.07.035') || c.startsWith('A16.07.036') || /частичного/i.test(n) && c.startsWith('A23')) return 'removable';
+    if (c.startsWith('A16.07.003') && /винир/i.test(n) && !/временн/i.test(n)) return 'veneer';
+    if ((c.startsWith('A16.07.004') || c.startsWith('A16.07.005') || (c.startsWith('A16.07.003') && /вкладкой керамич/i.test(n))) && !/временн|десны/i.test(n)) return 'fixed';
+    return '';
+  }
+  function acceptedItems(pg) {
+    const plans = ((pg && pg.plans) || []).filter((p) => p.applied);
+    const out = []; plans.forEach((p) => (p.treatmentPlanItems || []).forEach((it) => out.push(it)));
+    return { plans, items: out };
+  }
+  function detectRoutes(pg) {
+    const { items } = acceptedItems(pg), R = {};
+    items.forEach((it) => {
+      const r = routeOf(it); if (!r) return;
+      R[r] = R[r] || { id: r, teeth: [], items: [] }; R[r].items.push(it); (it.teeth || []).forEach((t) => { if (!R[r].teeth.includes(String(t))) R[r].teeth.push(String(t)); });
+    });
+    // культевые вкладки, временные коронки, снятие — к несъёмному маршруту
+    const posts = items.filter((it) => ncode(it.name).startsWith('A16.07.003') && /культев/i.test(it.name));
+    const temps = items.filter((it) => /временн/i.test(it.name) && /^A16\.07\.00[45]/.test(ncode(it.name)));
+    if (R.fixed) {
+      if (posts.length) { R.fixed.posts = posts.some((p) => /стекловолок|композитн/i.test(p.name)) ? 'fiber' : posts.some((p) => /в полости рта/i.test(p.name)) ? 'direct' : 'lab'; R.fixed.postTeeth = [...new Set(posts.flatMap((p) => (p.teeth || []).map(String)))]; }
+      if (temps.length) R.fixed.temp = temps.some((t) => /в полости рта/i.test(t.name)) ? 'chair' : 'lab';
+      const nm = R.fixed.items.map((i) => i.name).join(' ');
+      R.fixed.cem = /циркон/i.test(nm) ? 'rmgi' : /e-?max|керамическ|винир/i.test(nm) ? 'comp' : 'gic';
+      R.fixed.mk = /цельнолит|металлокерам/i.test(nm) && !/циркон/i.test(nm);
+      R.fixed.remove = items.filter(isRemoveItem).flatMap((i) => (i.teeth || []).map(String));
+      R.fixed.hasRemove = items.some(isRemoveItem);
+    }
+    if (R.implant) R.implant.screw = R.implant.items.some((i) => /винтов/i.test(i.name));
+    if (R.removable) R.removable.bugel = R.removable.items.some((i) => ncode(i.name).startsWith('A16.07.036'));
+    return R;
+  }
+  // ---- пройденные этапы из прошлых дневников ----
+  const strip = (h) => String(h || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ');
+  function stageHistory(pg) {
+    const vd = dDay(pg && pg.visitDate) || dDay(new Date()), out = [];
+    ((pg && pg.history && pg.history.visits) || []).forEach((v) => {
+      if (pg.visitId && (v.id === pg.visitId || v.visitID === pg.visitId)) return;
+      (v.journals || []).forEach((j) => {
+        const d = dDay(j.startDate || v.date || v.startDate); if (d && d >= vd) return;
+        const txt = (j.journalItems || []).map((it) => strip(it.content)).join(' ');
+        const re = /Этап лечения \(([^)]+)\)\s*:\s*([^.]*)/g; let m;
+        while ((m = re.exec(txt))) out.push({ route: m[1].split(' — ')[0].trim().toLowerCase(), text: m[2].toLowerCase(), date: d });
+      });
+    });
+    ((pg && pg.otherJournals) || []).forEach((j) => {
+      const txt = (j.journalItems || []).map((it) => strip(it.content)).join(' ');
+      const re = /Этап лечения \(([^)]+)\)\s*:\s*([^.]*)/g; let m;
+      while ((m = re.exec(txt))) out.push({ route: m[1].split(' — ')[0].trim().toLowerCase(), text: m[2].toLowerCase(), date: vd });
+    });
+    return out;
+  }
+  function routeStages(r, R) { return (STAGES[r] || []).filter((s) => !s.need || s.need(R || {})); }
+  function doneStages(r, hist) {
+    const lab = ROUTES[r].label, done = {};
+    hist.filter((h) => h.route === lab).forEach((h) => STAGES[r].forEach((s) => { if (h.text.includes(s.t)) done[s.id] = Math.max(done[s.id] || 0, h.date || 1); }));
+    return done;
+  }
+  function suggestStages(r, R, done) {
+    const list = routeStages(r, R), started = Object.keys(done).length > 0;
+    const next = list.find((s) => !s.opt && !done[s.id]);
+    if (!next) return [];
+    const sel = [next.id].concat(next.with || []).filter((id) => !done[id]);
+    if (!started && r === 'fixed') {
+      if (R && R.hasRemove && !done.remove) sel.unshift('remove');
+      // первый визит маршрута: снятие (если есть) + оттиски под лабораторные временные; препарирование — следующим визитом
+      if ((next.id === 'prep' || next.id === 'fiber') && !(R && R.temp === 'chair')) return [...new Set(sel.filter((x) => x === 'remove').concat('tempImp'))];
+    }
+    return [...new Set(sel)];
+  }
+  function routeStatus(r, pg) {
+    const RR = detectRoutes(pg), R = RR[r] || {}, done = doneStages(r, stageHistory(pg));
+    const list = routeStages(r, R), finished = list.filter((s) => !s.opt).every((s) => done[s.id]);
+    return { R, done, list, finished, started: Object.keys(done).length > 0, suggest: suggestStages(r, R, done) };
+  }
+  // ---- прикус по формуле: много отсутствующих боковых — восковые валики, иначе силиконовый регистрат ----
+  function biteDefault(pg) {
+    const F = pg && pg.formula ? readFormula(pg.formula) : {};
+    const sides = [1, 2, 3, 4].map((q) => [4, 5, 6, 7].filter((n) => isMissing(F[String(q * 10 + n)] || [])).length);
+    return sides.some((n) => n >= 3) ? 'wax' : 'sil';
+  }
+  const JAWS = (teeth) => { const s = new Set(teeth.map((t) => (/^[12]/.test(t) ? 'upper' : 'lower'))); return ['upper', 'lower'].filter((j) => s.has(j)); };
+  const jawText = (jaws) => (jaws.length === 2 ? 'верхней и нижней челюстей' : jaws[0] === 'lower' ? 'нижней челюсти' : 'верхней челюсти');
+  const CEM = { gic: 'стеклоиономерный цемент', rmgi: 'стеклоиономерный цемент, модифицированный смолой', comp: 'композитный цемент двойного отверждения по адгезивному протоколу' };
+  const BITE = {
+    wax: 'Определение центрального соотношения челюстей при помощи восковых шаблонов с прикусными валиками.',
+    sil: 'Регистрация центральной окклюзии силиконовым материалом для регистрации прикуса.',
+  };
+  function stageInit(b, pg, route) {
+    b.pg = pg;
+    const RR = detectRoutes(pg);
+    const st = (r) => routeStatus(r, pg);
+    if (!route) {
+      const avail = ROUTE_ORDER.filter((r) => RR[r]);
+      route = avail.find((r) => st(r).started && !st(r).finished) || avail.find((r) => !st(r).finished) || avail[0] || 'fixed';
+    }
+    b.params.route = route; b.auto.route = RR[route] ? 1 : 0;
+    const S = st(route), R = S.R;
+    b.params.stages = S.suggest; if (S.suggest.length) b.auto.stages = 1;
+    const T = (R.teeth || []).slice().sort();
+    b.params.teeth = T; if (T.length) b.auto.teeth = 1; else delete b.auto.teeth;
+    b.params.remTeeth = (R.remove || []).slice(); b.params.postTeeth = (R.postTeeth || []).slice();
+    const Fm = pg && pg.formula ? readFormula(pg.formula) : {}, kj = ['upper', 'lower'].filter((j) => kennedy(j, Fm));
+    b.params.jaw = JAWS(T).length ? JAWS(T) : kj.length ? kj : ['upper'];
+    b.params.temp = R.temp === 'chair' ? 'chair' : 'lab';
+    b.params.cem = R.cem || 'gic';
+    b.params.impM = R.mk ? 'sil' : 'scan';
+    b.params.biteM = biteDefault(pg); if (pg && pg.formula) b.auto.biteM = 1;
+    b.params.fixT = R.screw ? 'screw' : 'cem';
+    b.params.postM = R.posts === 'direct' ? 'direct' : 'lab';
+    ['temp', 'cem', 'impM', 'fixT'].forEach((k) => { if (RR[route]) b.auto[k] = 1; });
+    // услуги визита: вид оттиска
+    const sv = (b.svcNames || []).join(' ');
+    if (/альгинат/i.test(sv)) b.params.rImpM = 'alg';
+    if (/силикон/i.test(sv)) { b.params.impM = 'sil'; b.auto.impM = 1; }
+    if (/цифров|сканер/i.test(sv)) { b.params.impM = 'scan'; b.auto.impM = 1; }
+  }
+  function stageWhy(b, pg) {
+    const r = b.params.route, S = routeStatus(r, pg), lab = ROUTES[r].title;
+    if (!acceptedItems(pg).plans.length) return 'Принятого плана лечения нет — этапы выбирайте вручную.';
+    if (!detectRoutes(pg)[r]) return 'В принятом плане нет позиций для маршрута «' + lab + '» — этапы выбирайте вручную.';
+    const done = S.list.filter((s) => S.done[s.id]).map((s) => s.t + ' (' + fmtD(S.done[s.id]) + ')');
+    const nx = S.list.find((s) => !s.opt && !S.done[s.id]);
+    return esc2('Маршрут «' + lab + '». Пройдено: ' + (done.length ? done.join('; ') : 'ничего') + '. ' + (nx ? 'Следующий этап: ' + nx.t + '.' : 'Все этапы пройдены.'));
+  }
+  function stageFields(p, X) {
+    const pg = X.page || {}, r = p.route, R = (detectRoutes(pg)[r]) || {}, sel = p.stages || [], has = (id) => sel.includes(id);
+    const T = (p.teeth || []).slice().sort(), tl = T.length ? listT(T) : '___', tw = (T.length > 1 ? 'зубов ' : 'зуба ') + tl;
+    const list = routeStages(r, R).filter((s) => has(s.id));
+    if (!list.length) return { treatment: '' };
+    const head = 'Этап лечения (' + ROUTES[r].label + (T.length && !['removable', 'complete', 'implRem'].includes(r) ? ' — ' + tl : '') + '): ' + list.map((s) => s.t).join(', ') + '.';
+    const t = [head], rec = [];
+    const jaws = (p.jaw || []).length ? p.jaw : ['upper'];
+    const imp = p.impM === 'scan' ? 'Цифровое сканирование внутриротовым 3D-сканером' : 'Снятие двухслойного оттиска А-силиконовым материалом';
+    const shade = (p.shade || '').trim() ? ' Определение цвета: ' + p.shade.trim() + '.' : ' Определение цвета.';
+    const plansTxt = R.items ? planText([{ id: 'r', treatmentPlanItems: R.items }], ['r'], {}).orth : [];
+    if (r === 'fixed') {
+      if (has('remove')) t.push('Снятие несостоятельных ортопедических конструкций с ' + ((p.remTeeth || []).length ? ((p.remTeeth.length > 1 ? 'зубов ' : 'зуба ') + listT(p.remTeeth)) : '___') + '.');
+      if (has('tempImp')) t.push('Снятие оттисков альгинатным материалом с ' + jawText(JAWS(T).length ? ['upper', 'lower'] : jaws) + ' для изготовления временных коронок в зуботехнической лаборатории.');
+      const PT = (p.postTeeth || []).length ? listT(p.postTeeth) : tl;
+      if (has('postLab')) t.push('Распломбирование корневого канала ' + PT + ' на 2/3 длины, формирование ложа под культевую вкладку. ' + (p.postM === 'direct' ? 'Моделирование культевой вкладки прямым методом.' : 'Снятие двухслойного оттиска А-силиконовым материалом для изготовления культевой вкладки в лаборатории.') + ' Временная пломба.');
+      if (has('postFix')) t.push('Припасовка культевой вкладки ' + PT + ', фиксация на ' + (p.postCem === 'rmgi' ? 'стеклоиономерный цемент, модифицированный смолой' : 'стеклоиономерный цемент') + '.');
+      if (has('fiber')) t.push('Распломбирование корневого канала ' + PT + ', подготовка ложа. Фиксация стекловолоконного штифта на композитный цемент двойного отверждения по адгезивному протоколу. Восстановление культи зуба композитным материалом.');
+      if (has('prep')) {
+        t.push('Препарирование ' + tw + ' под ортопедические конструкции с формированием уступа.');
+        t.push(p.temp === 'chair' ? 'Изготовление временных коронок в полости рта, припасовка, фиксация на цинкоксидный цемент без эвгенола.' : 'Перебазировка, припасовка временных коронок, изготовленных в зуботехнической лаборатории, фиксация на цинкоксидный цемент без эвгенола.');
+        t.push('Окклюзионные контакты проверены, скорректированы.');
+        rec.push('Бережное отношение к временным коронкам: не откусывать твёрдую и липкую пищу. При расцементировке или поломке временной коронки — обратиться в клинику.');
+      }
+      if (has('imp')) {
+        t.push((has('prep') ? '' : 'Снятие временных коронок. ') + 'Ретракция десны ретракционной нитью. ' + imp + (p.impM === 'scan' ? ' препарированных зубов, зубов-антагонистов и окклюзии.' : ' с препарированных зубов, оттиска альгинатным материалом с челюсти-антагониста.') + shade);
+        if (!has('prep')) t.push('Повторная фиксация временных коронок на цинкоксидный цемент без эвгенола.');
+      }
+      if (has('bite')) t.push(BITE[p.biteM] || BITE.sil);
+      if (has('fix')) {
+        t.push((has('imp') ? '' : 'Снятие временных коронок, очистка культей от временного цемента. ') + 'Припасовка постоянных конструкций' + (plansTxt.length ? ' (' + plansTxt.join('; ') + ')' : '') + ': краевое прилегание, контактные пункты, окклюзионные контакты удовлетворительные, эстетика согласована с пациентом.');
+        t.push('Фиксация на ' + CEM[p.cem || 'gic'] + '. Удаление излишков цемента. Окклюзия проверена.');
+        rec.push('Гигиена полости рта с использованием зубной нити / ирригатора. Возможна чувствительность зубов в течение нескольких дней. Профилактический осмотр через 6 месяцев.');
+      }
+    }
+    if (r === 'implant') {
+      if (has('iImp')) t.push('Снятие формирователей десны с имплантатов в позиции ' + tl + '. ' + (p.impM === 'scan' ? 'Установка скан-маркеров' + (p.mu ? ' на мультиюниты' : '') + ', цифровое сканирование внутриротовым 3D-сканером, сканирование антагониста и окклюзии.' : 'Установка трансферов' + (p.mu ? ' на уровне мультиюнитов' : '') + ', снятие оттиска А-силиконовым материалом, оттиск челюсти-антагониста.') + shade + ' Установка формирователей десны.');
+      if (has('bite')) t.push(BITE[p.biteM] || BITE.sil);
+      if (has('iFix')) {
+        t.push('Снятие формирователей десны с имплантатов в позиции ' + tl + '. Припасовка коронок на имплантатах: краевое прилегание, контактные пункты, окклюзионные контакты удовлетворительные.');
+        t.push(p.fixT === 'screw' ? 'Фиксация коронок винтами с усилием ' + (p.torque || 30) + ' Н·см. Закрытие шахты винта политетрафторэтиленовой лентой и композитным материалом.' : 'Установка абатментов, затягивание винтов с усилием ' + (p.torque || 30) + ' Н·см, закрытие шахт винтов. Фиксация коронок на ' + CEM[p.cem === 'gic' ? 'gic' : 'rmgi'] + ', тщательное удаление излишков цемента.');
+        t.push('Окклюзия проверена.');
+        rec.push('Тщательная гигиена в области имплантатов (ирригатор, монопучковая щётка). Профилактический осмотр через 6 месяцев.');
+      }
+    }
+    if (r === 'veneer') {
+      if (has('vDiag')) t.push((p.impM === 'scan' ? 'Цифровое сканирование' : 'Снятие диагностических оттисков А-силиконовым материалом') + ' для восковой моделировки (wax-up). Фотопротокол.');
+      if (has('vMock')) t.push('Перенос восковой моделировки в полость рта (mock-up) временным композитным материалом по силиконовому ключу. Форма и цвет будущих реставраций согласованы с пациентом.');
+      if (has('vPrep')) { t.push('Препарирование ' + tw + ' под виниры' + (has('vMock') ? ' через mock-up' : '') + '. Ретракция десны. ' + imp + '.' + shade + (p.tempV ? ' Изготовление временных виниров.' : '')); rec.push('Не откусывать твёрдую пищу передними зубами.'); }
+      if (has('vFix')) { t.push('Припасовка виниров ' + tl + ': краевое прилегание, цвет и форма согласованы с пациентом. Изоляция, протравливание, силанизация. Фиксация на композитный цемент двойного отверждения по адгезивному протоколу. Удаление излишков, полировка. Окклюзия проверена.'); rec.push('Не откусывать твёрдую пищу передними зубами. Профилактический осмотр через 6 месяцев.'); }
+    }
+    const protName = r === 'removable' ? (R.bugel ? 'бюгельного протеза' : 'частичного съёмного протеза') : r === 'complete' ? 'полного съёмного протеза' : 'конструкции';
+    const jt = jawText(jaws);
+    if (r === 'removable') {
+      if (has('rImp')) t.push('Снятие анатомических оттисков ' + ({ alg: 'альгинатным', csil: 'С-силиконовым', asil: 'А-силиконовым' }[p.rImpM || 'alg']) + ' материалом с ' + jt + (jaws.length < 2 ? ' и челюсти-антагониста' : '') + ' для изготовления ' + protName + '.');
+      if (has('rBite')) t.push('Определение центральной окклюзии при помощи восковых шаблонов с прикусными валиками. Подбор цвета и формы искусственных зубов.');
+      if (has('rTry')) t.push('Примерка ' + (R.bugel ? 'каркаса бюгельного протеза и ' : '') + 'восковой композиции ' + protName + ' в полости рта: постановка искусственных зубов, окклюзионные контакты, фиксирующие элементы. Коррекция.');
+      if (has('rFix')) { t.push('Наложение ' + protName + '. Проверка фиксации и стабилизации, окклюзионных контактов, коррекция. Обучение пациента правилам пользования протезом и уходу за ним.'); rec.push('Период адаптации к протезу. Снимать протез на ночь, чистить после еды. Коррекция через 1–2 дня или при натёртостях.'); }
+    }
+    if (r === 'complete') {
+      if (has('cPre')) t.push('Снятие анатомических оттисков альгинатным материалом с ' + jt + ' для изготовления индивидуальных ложек.');
+      if (has('cImp')) t.push('Припасовка индивидуальной ложки (проба Гербста), окантовка краёв термопластической массой. Снятие функционального оттиска ' + (p.cImpM === 'asil' ? 'А-силиконовым' : 'С-силиконовым') + ' материалом с ' + jt + '.');
+      if (has('cBite')) t.push('Определение центрального соотношения челюстей при помощи восковых шаблонов с прикусными валиками: высота нижнего отдела лица, протетическая плоскость, ориентиры для постановки зубов. Подбор цвета и формы искусственных зубов.');
+      if (has('cTry')) t.push('Примерка восковой композиции ' + protName + ': постановка зубов, высота нижнего отдела лица, окклюзионные контакты, эстетика. Коррекция.');
+      if (has('cFix')) { t.push('Наложение ' + protName + ' на ' + jt + '. Проверка фиксации, стабилизации, окклюзионных контактов, коррекция. Обучение пациента правилам пользования протезом и уходу за ним.'); rec.push('Период адаптации к протезу. Чистить протез после еды. Коррекция через 1–2 дня или при натёртостях.'); }
+    }
+    if (r === 'implRem') {
+      if (has('irPre')) t.push('Снятие оттисков альгинатным материалом с ' + jt + ' для изготовления индивидуальной ложки.');
+      if (has('irImp')) t.push('Снятие формирователей десны. ' + (p.impM === 'scan' ? 'Установка скан-маркеров' + (p.mu ? ' на мультиюниты' : '') + ', цифровое сканирование внутриротовым 3D-сканером.' : 'Установка трансферов' + (p.mu ? ' на уровне мультиюнитов' : '') + ', снятие оттиска открытой индивидуальной ложкой А-силиконовым материалом.') + ' Установка формирователей десны.');
+      if (has('bite')) t.push(BITE[p.biteM] || BITE.wax);
+      if (has('irTry')) t.push('Примерка конструкции в полости рта: пассивная посадка, постановка зубов, окклюзионные контакты, эстетика. Коррекция.');
+      if (has('irFix')) { t.push('Фиксация (наложение) конструкции на имплантатах ' + jt + '. Затягивание винтов с усилием ' + (p.torque || 30) + ' Н·см. Проверка окклюзионных контактов, коррекция. Обучение пациента уходу за конструкцией.'); rec.push('Тщательная гигиена в области имплантатов (ирригатор). Профессиональная гигиена и осмотр каждые 6 месяцев.'); }
+    }
+    const fin = list.some((s) => s.final);
+    if (!fin) rec.push('Явка на следующий этап по записи.');
+    const tempIn = r === 'fixed' && (has('imp') || has('fix') || has('bite')) && !has('prep');
+    const F = pg.formula ? readFormula(pg.formula) : {};
+    const dg = ['upper', 'lower'].map((j) => kennedy(j, F)).filter(Boolean);
+    const code = pg.formula && !dg.length ? 'K08.8' : 'K08.1'; ORTHO_MKB = code;
+    const kTxt = ['upper', 'lower'].map((j) => { const k = kennedy(j, F); return !k ? '' : k.full ? 'Полная вторичная адентия ' + JAW_RU[j] : 'Частичная вторичная адентия ' + JAW_RU[j] + ', ' + k.cls + ' класс по Кеннеди' + (k.mod ? ', ' + k.mod + ' подкласс' : ''); }).filter(Boolean);
+    return {
+      complaints: 'Жалоб нет.',
+      anamnesisMorbi: 'Ортопедическое лечение по согласованному плану лечения.',
+      statusLocalis: !tempIn && (X.blocks || []).find((x) => x.tpl === 'orthoStage') !== X.b ? '' : tempIn ? 'Временные коронки ' + tl + ' фиксированы, состоятельны. Слизистая оболочка десны в области опорных зубов без признаков воспаления.' : 'Слизистая оболочка полости рта бледно-розовая, без патологических изменений.',
+      diagnosis: diagText(code, p.kennedy ? kTxt : [], T),
+      treatment: t.join(' '),
+      recommendations: rec.join(' '),
     };
   }
 
@@ -1410,6 +1706,44 @@
       },
       mkb: () => (ORTHO_MKB === 'K08.8' ? ['K08.8', 'K08.8 Другие уточненные изменения зубов и их опорного аппарата'] : ['K08.1', 'K08.1 Потеря зубов вследствие несчастного случая, удаления или локальной периодонтальной болезни']),
       fields: (p, T, P, X) => orthoExamText(p, X),
+    },
+
+    {
+      id: 'orthoStage', title: 'Ортопедия: этап', icon: '🔧', position: 'orthopedist', order: 51,
+      params: [
+        { key: 'why', label: 'Ход лечения', type: 'note', text: (b, pg) => stageWhy(b, pg) },
+        { key: 'route', autoText: 'из плана', label: 'Конструкция', type: 'select', options: ROUTE_ORDER.map((r) => opt(r, ROUTES[r].title)) },
+        { key: 'stages', autoText: 'следующий по истории', label: 'Этапы визита', type: 'chips', optionsFn: (b, pg) => { const S = routeStatus(b.params.route, pg); return S.list.map((s) => opt(s.id, (S.done[s.id] ? '✓ ' : '') + s.t.charAt(0).toUpperCase() + s.t.slice(1) + (s.opt ? ' (опц.)' : ''))); } },
+        { key: 'teeth', autoText: 'из плана', label: 'Зубы', type: 'toothSet', show: (p) => ['fixed', 'implant', 'veneer'].includes(p.route), need: () => true, needText: 'укажите зубы' },
+        { key: 'jaw', label: 'Челюсть', type: 'chips', options: [opt('upper', 'Верхняя'), opt('lower', 'Нижняя')], show: (p) => ['removable', 'complete', 'implRem'].includes(p.route) },
+        { key: 'remTeeth', label: 'Снимаем с зубов', type: 'toothSet', show: (p) => (p.stages || []).includes('remove'), need: () => true, needText: 'укажите зубы' },
+        { key: 'postTeeth', label: 'Вкладки / штифты', type: 'toothSet', show: (p) => (p.stages || []).some((x) => ['postLab', 'postFix', 'fiber'].includes(x)) },
+        { key: 'postM', label: 'Вкладка', type: 'seg', options: [opt('lab', 'Лабораторная (оттиск)'), opt('direct', 'Прямой метод')], show: (p) => (p.stages || []).includes('postLab') },
+        { key: 'postCem', label: 'Цемент вкладки', type: 'seg', options: [opt('gic', 'СИЦ'), opt('rmgi', 'RMGI')], default: 'gic', show: (p) => (p.stages || []).includes('postFix') },
+        { key: 'temp', autoText: 'из плана', label: 'Временные коронки', type: 'seg', options: [opt('lab', 'Лабораторные'), opt('chair', 'В полости рта')], show: (p) => (p.stages || []).includes('prep') },
+        { key: 'impM', autoText: 'из плана', label: 'Оттиск', type: 'seg', options: [opt('sil', 'А-силикон'), opt('scan', 'Скан')], show: (p) => (p.stages || []).some((x) => ['imp', 'iImp', 'vDiag', 'vPrep', 'irImp'].includes(x)) },
+        { key: 'mu', label: 'С уровня мультиюнитов', type: 'toggle', default: false, show: (p) => (p.stages || []).some((x) => ['iImp', 'irImp'].includes(x)) },
+        { key: 'shade', label: 'Цвет', type: 'text', placeholder: 'например: A2', show: (p) => (p.stages || []).some((x) => ['imp', 'iImp', 'vPrep'].includes(x)) },
+        { key: 'rImpM', label: 'Оттискной материал', type: 'seg', options: [opt('alg', 'Альгинат'), opt('csil', 'С-силикон'), opt('asil', 'А-силикон')], default: 'alg', show: (p) => (p.stages || []).includes('rImp') },
+        { key: 'cImpM', label: 'Функц. оттиск', type: 'seg', options: [opt('csil', 'С-силикон'), opt('asil', 'А-силикон')], default: 'csil', show: (p) => (p.stages || []).includes('cImp') },
+        { key: 'biteM', autoText: 'по формуле', label: 'Прикус', type: 'seg', options: [opt('wax', 'Восковые валики'), opt('sil', 'Силиконовый регистрат')], show: (p) => (p.stages || []).includes('bite') },
+        { key: 'cem', autoText: 'из плана', label: 'Цемент', type: 'select', options: [opt('gic', 'Стеклоиономерный'), opt('rmgi', 'СИЦ, модифицированный смолой (RMGI)'), opt('comp', 'Композитный двойного отверждения')], show: (p) => (p.stages || []).includes('fix') || ((p.stages || []).includes('iFix') && p.fixT === 'cem') },
+        { key: 'fixT', autoText: 'из плана', label: 'Фиксация', type: 'seg', options: [opt('screw', 'Винтовая'), opt('cem', 'Цементная')], show: (p) => (p.stages || []).includes('iFix') },
+        { key: 'torque', label: 'Торк, Н·см', type: 'number', default: 30, min: 10, max: 45, show: (p) => (p.stages || []).some((x) => ['iFix', 'irFix'].includes(x)) },
+        { key: 'tempV', label: 'Временные виниры', type: 'toggle', default: false, show: (p) => (p.stages || []).includes('vPrep') },
+        { key: 'kennedy', label: 'Уточнение (Кеннеди) в диагнозе', type: 'toggle', default: false, adv: true },
+      ],
+      init: (b, pg) => stageInit(b, pg, null),
+      onParam: (b, key) => { if (key === 'route') stageInit(b, b.pg || {}, b.params.route); },
+      check: (b) => {
+        const out = [], p = b.params;
+        if (!(p.stages || []).length) out.push({ lvl: 'bad', text: 'Ортопедия: этап — не выбран ни один этап' });
+        if (['fixed', 'implant', 'veneer'].includes(p.route) && !(p.teeth || []).length) out.push({ lvl: 'bad', text: 'Ортопедия: этап — не указаны зубы' });
+        if ((p.stages || []).includes('remove') && !(p.remTeeth || []).length) out.push({ lvl: 'bad', text: 'Ортопедия: этап — укажите зубы, с которых снимаются конструкции' });
+        return out;
+      },
+      mkb: () => (ORTHO_MKB === 'K08.8' ? ['K08.8', 'K08.8 Другие уточненные изменения зубов и их опорного аппарата'] : ['K08.1', 'K08.1 Потеря зубов вследствие несчастного случая, удаления или локальной периодонтальной болезни']),
+      fields: (p, T, P, X) => stageFields(p, X),
     },
 
   ];

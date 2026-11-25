@@ -627,7 +627,7 @@
   const STAGES = {
     fixed: [
       { id: 'remove', t: 'снятие несостоятельных конструкций', opt: true },
-      { id: 'tempImp', t: 'оттиски для временных коронок', opt: true },
+      { id: 'tempImp', t: 'оттиски (сканирование) для временных коронок', alt: ['оттиски для временных коронок'], opt: true },
       { id: 'postLab', t: 'изготовление культевой вкладки', need: (R) => R.posts === 'lab' || R.posts === 'direct' },
       { id: 'postFix', t: 'фиксация культевой вкладки', need: (R) => R.posts === 'lab' || R.posts === 'direct', with: ['prep'] },
       { id: 'fiber', t: 'восстановление культи на стекловолоконном штифте', need: (R) => R.posts === 'fiber', with: ['prep'] },
@@ -701,6 +701,7 @@
     if (R.fixed) {
       if (posts.length) { R.fixed.posts = posts.some((p) => /стекловолок|композитн/i.test(p.name)) ? 'fiber' : posts.some((p) => /в полости рта/i.test(p.name)) ? 'direct' : 'lab'; R.fixed.postTeeth = [...new Set(posts.flatMap((p) => (p.teeth || []).map(String)))]; }
       if (temps.length) R.fixed.temp = temps.some((t) => /в полости рта/i.test(t.name)) ? 'chair' : 'lab';
+      R.fixed.tempScan = temps.some((t) => /pmma|фрезерован|печат|3d/i.test(t.name));
       const nm = R.fixed.items.map((i) => i.name).join(' ');
       R.fixed.cem = /циркон/i.test(nm) ? 'rmgi' : /e-?max|керамическ|винир/i.test(nm) ? 'comp' : 'gic';
       R.fixed.mk = /цельнолит|металлокерам/i.test(nm) && !/циркон/i.test(nm);
@@ -734,7 +735,7 @@
   function routeStages(r, R) { return (STAGES[r] || []).filter((s) => !s.need || s.need(R || {})); }
   function doneStages(r, hist) {
     const lab = ROUTES[r].label, done = {};
-    hist.filter((h) => h.route === lab).forEach((h) => STAGES[r].forEach((s) => { if (h.text.includes(s.t)) done[s.id] = Math.max(done[s.id] || 0, h.date || 1); }));
+    hist.filter((h) => h.route === lab).forEach((h) => STAGES[r].forEach((s) => { if ([s.t].concat(s.alt || []).some((x) => h.text.includes(x))) done[s.id] = Math.max(done[s.id] || 0, h.date || 1); }));
     return done;
   }
   function suggestStages(r, R, done) {
@@ -744,8 +745,8 @@
     const sel = [next.id].concat(next.with || []).filter((id) => !done[id]);
     if (!started && r === 'fixed') {
       if (R && R.hasRemove && !done.remove) sel.unshift('remove');
-      // первый визит маршрута: снятие (если есть) + оттиски под лабораторные временные; препарирование — следующим визитом
-      if ((next.id === 'prep' || next.id === 'fiber') && !(R && R.temp === 'chair')) return [...new Set(sel.filter((x) => x === 'remove').concat('tempImp'))];
+      // первый визит маршрута: снятие (если есть) + оттиски / сканы под временные; препарирование — следующим визитом
+      if (next.id === 'prep' || next.id === 'fiber') return [...new Set(sel.filter((x) => x === 'remove').concat('tempImp'))];
     }
     return [...new Set(sel)];
   }
@@ -784,6 +785,7 @@
     const Fm = pg && pg.formula ? readFormula(pg.formula) : {}, kj = ['upper', 'lower'].filter((j) => kennedy(j, Fm));
     b.params.jaw = JAWS(T).length ? JAWS(T) : kj.length ? kj : ['upper'];
     b.params.temp = R.temp === 'chair' ? 'chair' : 'lab';
+    b.params.tempImpM = R.tempScan ? 'scan' : 'alg'; if (R.tempScan) b.auto.tempImpM = 1;
     b.params.cem = R.cem || 'gic';
     b.params.impM = R.mk ? 'sil' : 'scan';
     b.params.biteM = biteDefault(pg); if (pg && pg.formula) b.auto.biteM = 1;
@@ -801,8 +803,8 @@
     if (!acceptedItems(pg).plans.length) return 'Принятого плана лечения нет — этапы выбирайте вручную.';
     if (!detectRoutes(pg)[r]) return 'В принятом плане нет позиций для маршрута «' + lab + '» — этапы выбирайте вручную.';
     const done = S.list.filter((s) => S.done[s.id]).map((s) => s.t + ' (' + fmtD(S.done[s.id]) + ')');
-    const nx = S.list.find((s) => !s.opt && !S.done[s.id]);
-    return esc2('Маршрут «' + lab + '». Пройдено: ' + (done.length ? done.join('; ') : 'ничего') + '. ' + (nx ? 'Следующий этап: ' + nx.t + '.' : 'Все этапы пройдены.'));
+    const sg = S.list.filter((s) => S.suggest.includes(s.id)).map((s) => s.t);
+    return esc2('Маршрут «' + lab + '». Пройдено: ' + (done.length ? done.join('; ') : 'ничего') + '. ' + (sg.length ? 'Предложено сейчас: ' + sg.join(' + ') + '.' : 'Все этапы пройдены.'));
   }
   function stageFields(p, X) {
     const pg = X.page || {}, r = p.route, R = (detectRoutes(pg)[r]) || {}, sel = p.stages || [], has = (id) => sel.includes(id);
@@ -817,7 +819,7 @@
     const plansTxt = R.items ? planText([{ id: 'r', treatmentPlanItems: R.items }], ['r'], {}).orth : [];
     if (r === 'fixed') {
       if (has('remove')) t.push('Снятие несостоятельных ортопедических конструкций с ' + ((p.remTeeth || []).length ? ((p.remTeeth.length > 1 ? 'зубов ' : 'зуба ') + listT(p.remTeeth)) : '___') + '.');
-      if (has('tempImp')) t.push('Снятие оттисков альгинатным материалом с ' + jawText(JAWS(T).length ? ['upper', 'lower'] : jaws) + ' для изготовления временных коронок в зуботехнической лаборатории.');
+      if (has('tempImp')) t.push((p.tempImpM === 'scan' ? 'Цифровое сканирование внутриротовым 3D-сканером верхней и нижней челюстей и окклюзии' : 'Снятие оттисков альгинатным материалом с верхней и нижней челюстей') + ' для изготовления временных коронок в зуботехнической лаборатории.');
       const PT = (p.postTeeth || []).length ? listT(p.postTeeth) : tl;
       if (has('postLab')) t.push('Распломбирование корневого канала ' + PT + ' на 2/3 длины, формирование ложа под культевую вкладку. ' + (p.postM === 'direct' ? 'Моделирование культевой вкладки прямым методом.' : 'Снятие двухслойного оттиска А-силиконовым материалом для изготовления культевой вкладки в лаборатории.') + ' Временная пломба.');
       if (has('postFix')) t.push('Припасовка культевой вкладки ' + PT + ', фиксация на ' + (p.postCem === 'rmgi' ? 'стеклоиономерный цемент, модифицированный смолой' : 'стеклоиономерный цемент') + '.');
@@ -1713,13 +1715,14 @@
       params: [
         { key: 'why', label: 'Ход лечения', type: 'note', text: (b, pg) => stageWhy(b, pg) },
         { key: 'route', autoText: 'из плана', label: 'Конструкция', type: 'select', options: ROUTE_ORDER.map((r) => opt(r, ROUTES[r].title)) },
-        { key: 'stages', autoText: 'следующий по истории', label: 'Этапы визита', type: 'chips', optionsFn: (b, pg) => { const S = routeStatus(b.params.route, pg); return S.list.map((s) => opt(s.id, (S.done[s.id] ? '✓ ' : '') + s.t.charAt(0).toUpperCase() + s.t.slice(1) + (s.opt ? ' (опц.)' : ''))); } },
+        { key: 'stages', autoText: 'следующий по истории', label: 'Этапы визита', type: 'chips', optionsFn: (b, pg) => { const S = routeStatus(b.params.route, pg); return S.list.map((s) => opt(s.id, (S.done[s.id] ? '✓ ' : '') + s.t.charAt(0).toUpperCase() + s.t.slice(1))); } },
         { key: 'teeth', autoText: 'из плана', label: 'Зубы', type: 'toothSet', show: (p) => ['fixed', 'implant', 'veneer'].includes(p.route), need: () => true, needText: 'укажите зубы' },
         { key: 'jaw', label: 'Челюсть', type: 'chips', options: [opt('upper', 'Верхняя'), opt('lower', 'Нижняя')], show: (p) => ['removable', 'complete', 'implRem'].includes(p.route) },
         { key: 'remTeeth', label: 'Снимаем с зубов', type: 'toothSet', show: (p) => (p.stages || []).includes('remove'), need: () => true, needText: 'укажите зубы' },
         { key: 'postTeeth', label: 'Вкладки / штифты', type: 'toothSet', show: (p) => (p.stages || []).some((x) => ['postLab', 'postFix', 'fiber'].includes(x)) },
         { key: 'postM', label: 'Вкладка', type: 'seg', options: [opt('lab', 'Лабораторная (оттиск)'), opt('direct', 'Прямой метод')], show: (p) => (p.stages || []).includes('postLab') },
         { key: 'postCem', label: 'Цемент вкладки', type: 'seg', options: [opt('gic', 'СИЦ'), opt('rmgi', 'RMGI')], default: 'gic', show: (p) => (p.stages || []).includes('postFix') },
+        { key: 'tempImpM', autoText: 'из плана', label: 'Под временные', type: 'seg', options: [opt('alg', 'Альгинат'), opt('scan', 'Скан')], default: 'alg', show: (p) => (p.stages || []).includes('tempImp') },
         { key: 'temp', autoText: 'из плана', label: 'Временные коронки', type: 'seg', options: [opt('lab', 'Лабораторные'), opt('chair', 'В полости рта')], show: (p) => (p.stages || []).includes('prep') },
         { key: 'impM', autoText: 'из плана', label: 'Оттиск', type: 'seg', options: [opt('sil', 'А-силикон'), opt('scan', 'Скан')], show: (p) => (p.stages || []).some((x) => ['imp', 'iImp', 'vDiag', 'vPrep', 'irImp'].includes(x)) },
         { key: 'mu', label: 'С уровня мультиюнитов', type: 'toggle', default: false, show: (p) => (p.stages || []).some((x) => ['iImp', 'irImp'].includes(x)) },

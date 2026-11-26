@@ -31,7 +31,7 @@
   const LAT = { 'А': 'A', 'В': 'B', 'С': 'C', 'Е': 'E', 'К': 'K', 'М': 'M', 'Н': 'H', 'О': 'O', 'Р': 'P', 'Т': 'T', 'Х': 'X' };
   const normCode = (name) => ((name || '').trim().split(/\s+/)[0] || '').replace(/[АВСЕКМНОРТХ]/g, (c) => LAT[c]);
 
-  const ENGINE_VERSION = '1.6.0';
+  const ENGINE_VERSION = '1.6.1';
   // В визите может быть несколько дневников: SQNS держит их все на странице (каждый со своим journalIndex).
   // Какой открыт, по странице не понять, поэтому: выбранный в панели → иначе последний пустой → иначе последний.
   let JPICK = null;   // индекс дневника, выбранный врачом в панели
@@ -588,8 +588,9 @@
     root.getElementById('tab').onclick = () => openPanel();
     root.getElementById('shade').onclick = () => closePanel();
   }
-  function openPanel() { buildInitialState(); undoSnap = undoSnap || null; render(); wrap.classList.add('open'); isOpen = true;
-    if (VIEW === 'diary' && noServices()) toast('Сначала добавьте услуги в визит', 'warn'); }
+  // При открытии панели: в визите ещё нет услуг → вкладка «Услуги», услуги уже есть → «Дневник».
+  function openPanel() { buildInitialState(); undoSnap = undoSnap || null; if (SVCV()) VIEW = S.services.length ? 'diary' : 'svc';
+    render(); wrap.classList.add('open'); isOpen = true; }
   function closePanel() { wrap.classList.remove('open'); isOpen = false; }
   function toast(msg, lvl) {
     const t = root.getElementById('toast'); t.textContent = msg; t.className = 'toast show ' + (lvl || 'ok');
@@ -696,18 +697,18 @@
       (svcT.size ? '<span class="hint"><span class="sdot"></span> зуб есть в услугах</span>' : '') + '</div></div>';
   }
 
-  // ---- вкладки панели: «Дневник» (медзапись) и «Услуги» (svc-engine.js) ----
-  let VIEW = LS.get('view', 'diary');
+  // ---- вкладки панели: «Услуги» (svc-engine.js) и «Дневник» (медзапись) ----
+  let VIEW = 'svc';
   const SVCV = () => globalThis.SQNSMZ_SVCVIEW || null;
   const noServices = () => S && !S.services.length && !S.blocks.some((b) => !tplById(b.tpl).fixed) && !S.manualOk;
   const SVC_API = {
     toast: (m, l) => toast(m, l), rerender: () => render(), rebuild: () => buildInitialState(),
     fmtTooth, marks: () => fMarks(), page: () => PAGE,
-    gotoDiary: () => { VIEW = 'diary'; LS.set('view', VIEW); buildInitialState(); render(); },
+    gotoDiary: () => { VIEW = 'diary'; buildInitialState(); render(); },
   };
-  const viewTabs = () => SVCV() ? '<div class="vtabs"><button data-view="diary" class="' + (VIEW === 'diary' ? 'on' : '') + '">📝 Дневник</button><button data-view="svc" class="' + (VIEW === 'svc' ? 'on' : '') + '">🧾 Услуги</button></div>' : '';
+  const viewTabs = () => SVCV() ? '<div class="vtabs"><button data-view="svc" class="' + (VIEW === 'svc' ? 'on' : '') + '">🧾 Услуги</button><button data-view="diary" class="' + (VIEW === 'diary' ? 'on' : '') + '">📝 Дневник</button></div>' : '';
   function bindViews(P) {
-    P.querySelectorAll('[data-view]').forEach((el) => el.addEventListener('click', (e) => { VIEW = e.currentTarget.dataset.view; LS.set('view', VIEW); buildInitialState(); render(); }));
+    P.querySelectorAll('[data-view]').forEach((el) => el.addEventListener('click', (e) => { VIEW = e.currentTarget.dataset.view; buildInitialState(); render(); }));
   }
   function renderSvc(P) {
     const prevScroll = P.querySelector('.body') ? P.querySelector('.body').scrollTop : 0;
@@ -903,4 +904,3 @@
   start();
   setInterval(start, 2000);
 })();
-

@@ -32,6 +32,7 @@
   const allMini = (p) => { const r = Object.values(p.imp || {}); return r.length > 0 && r.every((x) => x.sys === 'mini'); };
   const mm = (x) => String(x).replace('.', ',');
   const sysHint = (sys) => (b, s) => { b.hints.placed = true; b.hints.sys = b.hints.sys || {}; b.hints.impTeeth = (b.hints.impTeeth || []).concat(s.teeth); b.hints.impQty = (b.hints.impQty || 0) + s.qty; s.teeth.forEach((t) => { b.hints.sys[t] = sys; }); b.hints.sysDefault = sys; };
+  const actHint = (a, kind) => (b, s) => { b.hints.act = b.hints.act || {}; s.teeth.forEach((t) => { b.hints.act[t] = a; }); b.hints[kind] = true; };
   const volHint = (k, v) => (b, s) => { b.hints.vol = b.hints.vol || {}; b.hints.vol[k] = (b.hints.vol[k] || 0) + v * s.qty; };
 
   // сколько каналов указано в услугах (берётся максимум) — для сверки с отмеченными каналами
@@ -73,9 +74,12 @@
     { code: 'A16.07.054', name: /anyridge|megagen/i, block: { tpl: 'surgery', merge: true, mergeAll: true, params: { parts: ['imp'] }, hint: sysHint('anyridge') }, label: 'Имплантат AnyRidge' },
     { code: 'A16.30.026', block: { tpl: 'surgery', merge: true, mergeAll: true, params: { parts: ['rem'] } }, label: 'Удаление имплантата' },
     // ФДМ / временный абатмент (если в визите есть установка имплантатов — уходят в супраструктуру операции)
-    { code: 'A16.07.054', name: /формировател/i, block: { tpl: 'fdm', merge: true, mergeAll: true, params: { action: 'healing' } }, label: 'Формирователь десны (ФДМ)' },
-    { code: 'A16.07.054', name: /временн\S* а+б+атмент/i, block: { tpl: 'fdm', merge: true, mergeAll: true, params: { action: 'temp' } }, label: 'Временный абатмент' },
-    { code: 'A16.07.006', name: /временн/i, block: { tpl: 'fdm', merge: true, mergeAll: true, params: { action: 'temp' } }, label: 'Временный абатмент' },
+    // hint запоминает, что стоит на каждом зубе (в визите может быть ФДМ на одних имплантатах и абатменты на других)
+    { code: 'A16.07.054', name: /формировател/i, block: { tpl: 'fdm', merge: true, mergeAll: true, params: { action: 'healing' }, hint: actHint('healing', 'surg') }, label: 'Формирователь десны (ФДМ)' },
+    { code: 'A16.07.054', name: /временн\S* а+б+атмент/i, block: { tpl: 'fdm', merge: true, mergeAll: true, params: { action: 'temp' }, hint: actHint('temp', 'surg') }, label: 'Временный абатмент' },
+    { code: 'A16.07.006', name: /а+б+атмент\S*\s+временн/i, block: { tpl: 'fdm', merge: true, mergeAll: true, params: { action: 'temp' }, hint: actHint('temp', 'supra') }, label: 'Временный абатмент' },
+    { code: 'A16.07.006', name: /а+б+атмент\S*\s+стандартн/i, block: { tpl: 'fdm', merge: true, mergeAll: true, params: { action: 'std' }, hint: actHint('std', 'supra') }, label: 'Стандартный абатмент' },
+    { code: 'A16.07.006', name: /мультиюнит/i, block: { tpl: 'fdm', merge: true, mergeAll: true, params: { action: 'mu' }, hint: actHint('mu', 'supra') }, label: 'Мультиюнит' },
     // костная пластика: материалы
     { code: 'A16.07.041.001', name: /bio-?oss/i, block: { tpl: 'surgery', merge: true, mergeAll: true, params: { parts: ['graft'], mats: ['biooss'] }, hint: volHint('bio', 0.5) }, label: 'Bio-Oss' },
     { code: 'A16.07.041.001', name: /xenograft.*3[,.]0/i, block: { tpl: 'surgery', merge: true, mergeAll: true, params: { parts: ['graft'], mats: ['xeno'] }, hint: volHint('xeno', 3) }, label: 'Xenograft 3,0 см³' },
@@ -200,6 +204,24 @@
     { v: 'mesh', l: 'Титановая сетка', t: 'титановой сеткой' },
     { v: 'prf', l: 'PRF', t: 'фибриновыми мембранами PRF' },
   ];
+  // что установлено на имплантат: [ед., мн., род. ед., род. мн.]
+  const SUPRA = {
+    cover: ['винт-заглушка', 'винты-заглушки', 'винта-заглушки', 'винтов-заглушек'],
+    healing: ['формирователь десны', 'формирователи десны', 'формирователя десны', 'формирователей десны'],
+    temp: ['временный абатмент', 'временные абатменты', 'временного абатмента', 'временных абатментов'],
+    tempCrown: ['временный абатмент', 'временные абатменты', 'временного абатмента', 'временных абатментов'],
+    std: ['стандартный абатмент', 'стандартные абатменты', 'стандартного абатмента', 'стандартных абатментов'],
+    mu: ['мультиюнит', 'мультиюниты', 'мультиюнита', 'мультиюнитов'],
+  };
+  const SUPRA_ORDER = ['cover', 'healing', 'temp', 'tempCrown', 'std', 'mu'];
+  // зубы → группы по виду: [['healing', ['36']], ['std', ['46', '47']]]
+  function supraGroups(teeth, map, def) {
+    const g = {}; (teeth || []).forEach((t) => { const a = (map || {})[t] || def; (g[a] = g[a] || []).push(String(t)); });
+    return SUPRA_ORDER.filter((a) => g[a]).map((a) => [a, g[a].sort()]);
+  }
+  const andJoin = (a) => (a.length > 1 ? a.slice(0, -1).join(', ') + ' и ' + a[a.length - 1] : a[0] || '');
+  const SUPRA_OPTS = [opt('cover', 'Винт-заглушка'), opt('healing', 'ФДМ'), opt('temp', 'Временный абатмент'), opt('tempCrown', 'Абатмент + врем. коронка'), opt('std', 'Стандартный абатмент'), opt('mu', 'Мультиюнит')];
+  const FDM_ACTS = [opt('healing', 'ФДМ'), opt('temp', 'Временный абатмент'), opt('std', 'Стандартный абатмент'), opt('mu', 'Мультиюнит'), opt('tempCrown', 'Абатмент + врем. коронка')];
   const memT = (v) => (MEMBRANES.find((m) => m.v === v) || { t: '' }).t;
   const plural = (n, one, few, many) => { const a = n % 10, b = n % 100; return a === 1 && b !== 11 ? one : a >= 2 && a <= 4 && (b < 12 || b > 14) ? few : many; };
   const tgen = (arr) => { const f = (arr || []).slice().sort().map(fmtTooth); return f.length ? (f.length === 1 ? 'зуба ' : 'зубов ') + f.join(', ') : '___'; };
@@ -287,8 +309,10 @@
       const lots = []; if (p.lotMat) lots.push('LOT материала: ' + p.lotMat); if (p.lotMem) lots.push('LOT мембраны: ' + p.lotMem);
       if (lots.length) t.push(lots.join('; ') + '.');
     }
-    if (imp && !allMini(p)) { const many = impT.length > 1;
-      t.push({ cover: 'Установлен' + (many ? 'ы винты-заглушки' : ' винт-заглушка') + '.', healing: 'Установлен' + (many ? 'ы формирователи' : ' формирователь') + ' десны.',
+    if (imp && !allMini(p) && p.supra === 'mixed') {
+      t.push('Установлены: ' + supraGroups(impT, p.supraActs, 'cover').map(([a, tt]) => SUPRA[a][tt.length > 1 ? 1 : 0] + ' — ' + tt.map(fmtTooth).join(', ')).join('; ') + '.');
+    } else if (imp && !allMini(p)) { const many = impT.length > 1;
+      t.push({ std: 'Установлен' + (many ? 'ы стандартные абатменты' : ' стандартный абатмент') + ', фиксация винтом.', mu: 'Установлен' + (many ? 'ы мультиюниты' : ' мультиюнит') + ', фиксация винтом.', cover: 'Установлен' + (many ? 'ы винты-заглушки' : ' винт-заглушка') + '.', healing: 'Установлен' + (many ? 'ы формирователи' : ' формирователь') + ' десны.',
         temp: 'Установлен' + (many ? 'ы временные абатменты' : ' временный абатмент') + '.', tempCrown: 'Установлен' + (many ? 'ы временные абатменты' : ' временный абатмент') + ', фиксирована временная коронка, выведена из окклюзии.' }[p.supra]); }
     if (p.prf && !mems.includes('prf')) t.push('Фибриновые сгустки PRF уложены в область вмешательства.');
     if (has(p, 'soft')) softText(p.softM, T).forEach((x) => t.push(x));
@@ -366,6 +390,10 @@
       if (ops.ready) { const nb = E.newBlock('orthoExam', [], 'auto'); nb.autoNote = 'есть план лечения'; blocks.push(nb); }
       else if (wantStage) blocks.push(...stageBlocks());
     }
+    // абатменты из ортопедического раздела в ортопедическом визите (без приёма хирурга) — часть этапа протезирования, не хирургия
+    const svcs = E.services || [];
+    const orthoVisit = blocks.some((b) => /^ortho/.test(b.tpl)) || svcs.some((s) => s.code.startsWith('A16.07.006') && /коронк|протез|балк/i.test(s.name));
+    if (orthoVisit && !svcs.some((s) => s.code.startsWith('B01.067'))) blocks.filter((b) => b.tpl === 'fdm' && b.hints.supra && !b.hints.surg).forEach((x) => blocks.splice(blocks.indexOf(x), 1));
     const surg = blocks.find((b) => b.tpl === 'surgery');
     const overlap = (a, b) => !a.teeth.length || !b.teeth.length || a.teeth.some((t) => b.teeth.includes(t));
     if (surg) {
@@ -382,7 +410,11 @@
         blocks.splice(blocks.indexOf(x), 1);
       });
       blocks.filter((b) => b.tpl === 'fdm').forEach((x) => {
-        if (has(surg.params, 'imp')) { surg.params.supra = x.params.action; surg.auto.supra = 1; blocks.splice(blocks.indexOf(x), 1); }
+        if (!has(surg.params, 'imp')) return;
+        const acts = x.hints.act || {}, kinds = [...new Set(Object.values(acts))];
+        if (kinds.length > 1) { surg.params.supra = 'mixed'; surg.params.supraActs = Object.assign({}, acts); }
+        else surg.params.supra = kinds[0] || x.params.action;
+        surg.auto.supra = 1; blocks.splice(blocks.indexOf(x), 1);
       });
       blocks.filter((b) => b.tpl === 'soft' && overlap(b, surg)).forEach((x) => {
         const sm = (x.params.softM || []).filter((m) => m === 'sct' || m === 'gingivo');
@@ -1408,7 +1440,7 @@
             { key: 'tq', label: 'Торк', optional: true, options: () => ['15', '20', '25', '30', '35', '40', '45', '50'].map((x) => ({ v: x, l: x + ' Н·см' })) },
             { key: 'lot', label: 'LOT', type: 'text', optional: true, placeholder: 'необяз.' },
           ] },
-        { key: 'supra', label: 'Супраструктура', type: 'seg', options: [opt('cover', 'Винт-заглушка'), opt('healing', 'ФДМ'), opt('temp', 'Временный абатмент'), opt('tempCrown', 'Абатмент + врем. коронка')], default: 'cover', show: (p) => has(p, 'imp') && !allMini(p) },
+        { key: 'supra', label: 'Супраструктура', type: 'seg', options: SUPRA_OPTS, optionsFn: (b) => SUPRA_OPTS.concat(b.params.supra === 'mixed' ? [opt('mixed', 'Разное по зубам (из услуг)')] : []), default: 'cover', show: (p) => has(p, 'imp') && !allMini(p) },
         { key: 'adentia', label: 'Адентия', type: 'seg', options: [opt('partial', 'Частичная'), opt('full', 'Полная')], default: 'partial', show: (p) => has(p, 'imp') && !has(p, 'ext'), adv: true },
         { key: 'h3', label: 'Костная пластика', type: 'heading', show: (p) => has(p, 'graft') },
         { key: 'methods', label: 'Метод пластики', type: 'chips', options: [opt('gbr', 'НКР'), opt('socket', 'Сохранение лунки'), opt('split', 'Расщепление гребня'), opt('sinusOpen', 'Открытый синус-лифтинг'), opt('sinusClosed', 'Закрытый синус-лифтинг')], default: [], show: (p) => has(p, 'graft') },
@@ -1487,38 +1519,57 @@
     {
       id: 'fdm', title: 'ФДМ / 2 этап', icon: '🪛', position: 'surgeon', order: 46, needTeeth: true,
       params: [
-        { key: 'action', label: 'Этап', type: 'seg', options: [opt('healing', 'Установка ФДМ'), opt('temp', 'Временный абатмент'), opt('tempCrown', 'Абатмент + врем. коронка')], default: 'healing' },
-        { key: 'access', label: 'Доступ', type: 'seg', options: [opt('incision', 'Разрез над имплантатом'), opt('punch', 'Мукотом (панч)'), opt('flap', 'Лоскут')], default: 'incision', show: (p) => p.action === 'healing' },
+        { key: 'action', label: 'Устанавливаем', type: 'seg', options: FDM_ACTS, default: 'healing', show: (p) => !p.mix },
+        { key: 'mix', label: 'Разное по зубам', type: 'toggle', default: false },
+        { key: 'acts', label: 'Что установлено на каждом имплантате', type: 'perTooth', show: (p) => p.mix, rowsFor: (b) => b.teeth.slice().sort(),
+          init: (b, t) => ({ a: (b.hints.act || {})[t] || b.params.action }), fields: [{ key: 'a', label: 'Установлено', options: () => FDM_ACTS }] },
+        { key: 'access', label: 'Доступ', type: 'seg', options: [opt('incision', 'Разрез над имплантатом'), opt('punch', 'Мукотом (панч)'), opt('flap', 'Лоскут')], default: 'incision', show: (p) => p.action === 'healing' || p.mix },
         { key: 'remove', label: 'Снятие', type: 'chips', options: [opt('mesh', 'Титановая сетка'), opt('ptfe', 'Нерезорб. мембрана'), opt('screws', 'Винты / пины')], default: [] },
         { key: 'softM', label: 'Мягкие ткани', type: 'chips', options: [opt('sct', 'ССТ'), opt('gingivo', 'Гингивопластика')], default: [] },
         { key: 'sutures', label: 'Швы', type: 'toggle', default: false },
         { key: 'sutMat', label: 'Шовный материал', type: 'seg', options: [opt('кетгут', 'Кетгут'), opt('еврокрил', 'Еврокрил'), opt('PTFE')], default: 'еврокрил', show: (p) => p.sutures },
       ],
       onParam: (b, key) => { if ((key === 'remove' || key === 'softM') && ((b.params.remove || []).length || (b.params.softM || []).length) && !b.touched.sutures) b.params.sutures = true; },
-      finalize: (b) => { if (((b.params.remove || []).length || (b.params.softM || []).length) && !b.auto.sutures) b.params.sutures = true; },
+      finalize: (b) => {
+        if (((b.params.remove || []).length || (b.params.softM || []).length) && !b.auto.sutures) b.params.sutures = true;
+        // по услугам на разных зубах стоит разное → «Разное по зубам»
+        const kinds = [...new Set(Object.values(b.hints.act || {}))];
+        if (kinds.length > 1 && !b.touched.mix) { b.params.mix = true; b.auto.mix = 1; b.params.acts = {}; }
+        else if (kinds.length === 1) b.params.action = kinds[0];
+      },
+      check: (b) => (b.params.mix && b.teeth.some((t) => { const r = (b.params.acts || {})[t]; return r && !r.a; }) ? [{ lvl: 'bad', text: 'ФДМ / 2 этап: укажите, что установлено на каждом имплантате' }] : []),
       mkb: () => K081,
-      fields: (p, T) => {
-        const many = T.list.indexOf(',') > 0, t = [];
+      fields: (p, T, P, X) => {
+        const teeth = ((X && X.b && X.b.teeth) || []).slice().sort(), map = {};
+        Object.keys(p.acts || {}).forEach((t) => { if ((p.acts[t] || {}).a) map[t] = p.acts[t].a; });
+        const G = p.mix ? supraGroups(teeth, map, p.action) : [[p.action, teeth]];
+        const where = (tt) => (p.mix && G.length > 1 ? ' в области ' + tgen(tt) : '');
+        const heal = G.filter((g) => g[0] === 'healing'), onlyHeal = G.every((g) => g[0] === 'healing'), many = T.list.indexOf(',') > 0, t = [];
         const rm = p.remove || [], sm = p.softM || [];
-        const open = rm.length || sm.length || p.access === 'flap';
+        const open = rm.length || sm.length || ((heal.length || !teeth.length) && p.access === 'flap');
         if (open) t.push('Разрез, отслаивание слизисто-надкостничного лоскута в области ' + T.gen + '.');
-        else if (p.action === 'healing') t.push(p.access === 'punch' ? 'Иссечение слизистой оболочки над ' + (many ? 'имплантатами' : 'имплантатом') + ' мукотомом.' : 'Разрез слизистой оболочки над ' + (many ? 'имплантатами' : 'имплантатом') + ' в области ' + T.gen + '.');
+        else if (heal.length) { const hT = heal[0][1], hm = hT.length > 1, at = G.length > 1 ? ' в области ' + tgen(hT) : ' в области ' + T.gen;
+          t.push(p.access === 'punch' ? 'Иссечение слизистой оболочки над ' + (hm ? 'имплантатами' : 'имплантатом') + (G.length > 1 ? at : '') + ' мукотомом.' : 'Разрез слизистой оболочки над ' + (hm ? 'имплантатами' : 'имплантатом') + at + '.'); }
         if (rm.includes('mesh')) t.push('Удаление титановой сетки.');
         if (rm.includes('ptfe')) t.push('Удаление нерезорбируемой мембраны.');
         if (rm.includes('screws')) t.push('Удаление фиксирующих винтов (пинов).');
         if (rm.length) t.push('Оценка регенерата: костная ткань сформирована.');
-        if (p.action === 'healing') t.push('Удаление ' + (many ? 'винтов-заглушек' : 'винта-заглушки') + ', установка ' + (many ? 'формирователей' : 'формирователя') + ' десны.');
-        else t.push('Снятие ' + (many ? 'формирователей' : 'формирователя') + ' десны, установка ' + (many ? 'временных абатментов' : 'временного абатмента') + (p.action === 'tempCrown' ? ', фиксация временной коронки, выведена из окклюзии.' : '.'));
+        G.forEach(([a, tt]) => {
+          const n = (tt.length || (many ? 2 : 1)) > 1;
+          if (a === 'healing') t.push('Удаление ' + (n ? 'винтов-заглушек' : 'винта-заглушки') + ', установка ' + SUPRA.healing[n ? 3 : 2] + where(tt) + '.');
+          else t.push('Снятие ' + (n ? 'формирователей' : 'формирователя') + ' десны, установка ' + SUPRA[a][n ? 3 : 2] + where(tt) + (a === 'std' || a === 'mu' ? ', фиксация винтом' : '') + (a === 'tempCrown' ? ', фиксация временной коронки, выведена из окклюзии' : '') + '.');
+        });
         softText(sm, T).forEach((x) => t.push(x));
         if (p.sutures) t.push((open ? 'Лоскут уложен, наложены швы' : 'Наложены швы') + ' (' + p.sutMat + ').');
         if (open || p.sutures) t.push('Гемостаз достигнут.');
-        const r = ['Тщательная гигиена полости рта, аккуратная чистка в области ' + (p.action === 'healing' ? 'формирователей' : 'временных конструкций') + '.'];
+        const tempOnly = G.every((g) => g[0] === 'temp' || g[0] === 'tempCrown');
+        const r = ['Тщательная гигиена полости рта, аккуратная чистка в области ' + (onlyHeal ? 'формирователей' : tempOnly ? 'временных конструкций' : 'имплантатов') + '.'];
         if (open) r.push('Холод на область вмешательства в первые часы, исключить горячую и твёрдую пищу.');
         if (p.sutures && p.sutMat !== 'кетгут') r.push('Снятие швов через 10–14 дней.');
-        if (p.action === 'tempCrown') r.push('Не нагружать временную коронку, пища мягкой консистенции.');
-        r.push(p.action === 'healing' ? 'Явка на ортопедический этап через 2–3 недели.' : 'Явка на следующий ортопедический этап по записи.');
+        if (G.some((g) => g[0] === 'tempCrown')) r.push('Не нагружать временную коронку, пища мягкой консистенции.');
+        r.push(onlyHeal ? 'Явка на ортопедический этап через 2–3 недели.' : 'Явка на следующий ортопедический этап по записи.');
         return {
-          complaints: 'Жалоб нет. Явился для ' + (p.action === 'healing' ? 'установки ' + (many ? 'формирователей' : 'формирователя') + ' десны' : 'установки ' + (many ? 'временных абатментов' : 'временного абатмента')) + '.',
+          complaints: 'Жалоб нет. Явился для установки ' + andJoin(G.map(([a, tt]) => SUPRA[a][(tt.length || (many ? 2 : 1)) > 1 ? 3 : 2])) + '.',
           anamnesisMorbi: 'Ранее в области ' + T.gen + ' установлен(ы) дентальные имплантаты' + (rm.length ? ' с направленной костной регенерацией' : '') + '. Период остеоинтеграции завершён.',
           statusLocalis: 'Слизистая оболочка в области ' + T.gen + ' бледно-розовая, без признаков воспаления.' + (sm.length ? ' Недостаточный объём мягких тканей в области ' + T.gen + '.' : ''),
           diagnosis: 'Частичная вторичная адентия: отсутствие ' + T.gen + ', K08.1.',

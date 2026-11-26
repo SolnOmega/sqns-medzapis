@@ -290,12 +290,13 @@
   const teethLine = (id, tt) => (tt.length ? { id, qty: tt.length, teeth: tt } : null);
   const push = (L, x) => { if (x) L.push(x); };
 
-  // Швы: по умолчанию 1 обычный; PTFE — на выбор
-  const SUTURES = (on) => [
+  // Швы: по умолчанию 1 обычный; PTFE — на выбор (ptfe: false — только обычные)
+  const SUTURES = (on, o) => [
     { key: 'sut', label: 'Швы', type: 'toggle', default: on },
     { key: 'sutN', label: 'Количество', unit: 'шт.', type: 'counter', min: 1, max: 20, default: 1, sub: true, show: (p) => p.sut },
+  ].concat(o && o.ptfe === false ? [] : [
     { key: 'sutType', label: 'Шов', type: 'seg', options: [opt('184', 'Обычный'), opt('185', 'PTFE')], default: '184', sub: true, show: (p) => p.sut },
-  ];
+  ]);
   const sutLines = (p, L) => { if (p.sut && +p.sutN > 0) L.push({ id: +p.sutType || 184, qty: +p.sutN }); };
 
   // Удаление зубов внутри другого сценария: свой набор зубов (ничего не предвыбрано) и способ по каждому зубу
@@ -377,6 +378,9 @@
   /* ---------------- имплантация ---------------- */
   const IMPL_SYS = { osstem: 212, dentium: 213 };
   const ABUT = { temp: 117, std: 119, mu: 124 };
+  // что ставим на имплантат (второй этап): формирователь или абатмент
+  const ON_IMPL = { fdm: 215, temp: 117, std: 119, mu: 124 };
+  const ON_IMPL_OPTS = [opt('fdm', 'ФДМ'), opt('temp', 'Временный'), opt('std', 'Стандартный'), opt('mu', 'Мультиюнит')];
   const IMPL_EXT = EXTRACT({ hl: (p, teeth) => teeth, hlText: 'зубы имплантатов' });
   const IMPL_GRAFT = GRAFT();
   // шаблон — по одному на челюсть с имплантатами; полный протокол: до 5 / более 5 имплантатов на челюсти
@@ -565,6 +569,32 @@
         if (p.fdm) push(L, teethLine(215, sorted(p.fdmTeeth)));
         if (p.abut) push(L, teethLine(ABUT[p.abut], sorted(p.abutTeeth)));
         IMPL_GRAFT.soft(p, L);
+        sutLines(p, L);
+        return L;
+      },
+    },
+    {
+      id: 'fdm', title: 'Установка ФДМ (абатментов)', icon: '🪛', cat: 'surg', needTeeth: true, teethTitle: 'Имплантаты',
+      params: [
+        SURG_VISIT,
+        { key: 'iso', label: 'Изоляция', type: 'opt', options: [opt('optra', 'OptraGate')], default: 'optra' },
+        ...ANEST(true),
+        { key: 'put', label: 'Устанавливаем', type: 'perTooth', wide: true, options: ON_IMPL_OPTS, default: 'fdm' },
+        ...SUTURES(true, { ptfe: false }),
+        { key: 'gingivo', label: 'Гингивопластика', type: 'toggle', default: false },
+      ],
+      check: (p, teeth) => {
+        const out = [];
+        if (!teeth.length) out.push({ lvl: 'bad', text: 'Отметьте имплантаты' });
+        if (p.anest && !(+p.infil + +p.cond)) out.push({ lvl: 'warn', text: 'Анестезия включена, но карпул 0' });
+        return out;
+      },
+      build: (p, teeth) => {
+        const L = [surgVisitLine(p)];
+        anestLines(p, L);
+        if (p.iso) L.push({ id: 9, qty: 1 });
+        Object.keys(ON_IMPL).forEach((k) => push(L, teethLine(ON_IMPL[k], sorted(teeth).filter((t) => ((p.put || {})[t] || 'fdm') === k))));
+        if (p.gingivo) L.push({ id: 211, qty: 1 });
         sutLines(p, L);
         return L;
       },

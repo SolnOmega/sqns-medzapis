@@ -209,11 +209,12 @@
   .cl:last-child{border:0} .cl .cd{font-family:ui-monospace,Consolas,monospace;color:#475569;font-size:11.5px} .cl .q{font-weight:700;white-space:nowrap} .cl .pr{white-space:nowrap;color:#334155;text-align:right;min-width:70px}
   .cl.skip{opacity:.5} .tot{display:flex;justify-content:space-between;font-weight:800;padding:8px 2px 0;font-size:13.5px}
   .done{background:#f0fdf4;border-color:#bbf7d0}
-  .cats{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
-  .cat{display:flex;align-items:center;gap:7px;border:1.5px solid #e2e8f0;background:#fff;border-radius:12px;padding:9px 10px;cursor:pointer;color:#334155;text-align:left}
-  .cat:hover{border-color:#818cf8} .cat .cv{color:#94a3b8;font-size:11px}
-  .cat.has{border-color:#a5b4fc} .cat.open{background:linear-gradient(135deg,rgba(14,165,163,.10),rgba(99,102,241,.14));border-color:#818cf8;color:#312e81}
-  .catl{margin-top:8px;padding-top:6px;border-top:1px dashed #e2e8f0}
+  .cats{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;background:#e0e7ff;padding:4px;border-radius:13px}
+  .cat{display:flex;align-items:center;gap:7px;border:0;background:transparent;border-radius:10px;padding:8px 10px;cursor:pointer;color:#3730a3;text-align:left;font-weight:700}
+  .cat:hover{background:rgba(255,255,255,.65)} .cat .cv{color:#6366f1;font-size:11px}
+  .cat.has{background:rgba(255,255,255,.55)}
+  .cat.open{background:linear-gradient(135deg,#0ea5a3,#6366f1);color:#fff;box-shadow:0 3px 10px rgba(79,70,229,.3)} .cat.open .cv{color:#e0e7ff}
+  .catl{margin-top:10px}
   .csub{margin:10px 0 4px;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:#6366f1;font-weight:800}
   .catl .csub:first-child{margin-top:2px}
   .wrow{margin:6px 0}
@@ -373,6 +374,7 @@
       if (!tt.length) return pr.teethFrom ? '' : '<div class="row"><label>' + esc(pr.label) + '</label><div>' + badge('warn', 'отметьте зубы') + '</div></div>';
       ctl = tt.slice().sort().map((t) => '<div class="ptm">' + (tt.length > 1 || pr.teethFrom ? '<span class="tchip">' + API.fmtTooth(t) + '</span>' : '') + '<div class="seg">' + pr.options.map((o) => '<button data-spt="' + pr.key + '" data-t="' + t + '" data-v="' + esc(o.v) + '" class="' + ((v || {})[t] === o.v ? 'on' : '') + '">' + esc(o.l) + '</button>').join('') + '</div></div>').join('');
     }
+    if (pr.type === 'perTooth' && pr.wide) return '<div class="wrow"><div class="flbl">' + esc(pr.label) + '</div>' + ctl + '</div>';
     return '<div class="row"><label>' + esc(pr.label) + auto + '</label><div>' + ctl + '</div></div>';
   }
 

@@ -31,7 +31,7 @@
   const LAT = { 'А': 'A', 'В': 'B', 'С': 'C', 'Е': 'E', 'К': 'K', 'М': 'M', 'Н': 'H', 'О': 'O', 'Р': 'P', 'Т': 'T', 'Х': 'X' };
   const normCode = (name) => ((name || '').trim().split(/\s+/)[0] || '').replace(/[АВСЕКМНОРТХ]/g, (c) => LAT[c]);
 
-  const ENGINE_VERSION = '1.5.5';
+  const ENGINE_VERSION = '1.6.0';
   // В визите может быть несколько дневников: SQNS держит их все на странице (каждый со своим journalIndex).
   // Какой открыт, по странице не понять, поэтому: выбранный в панели → иначе последний пустой → иначе последний.
   let JPICK = null;   // индекс дневника, выбранный врачом в панели
@@ -580,7 +580,7 @@
     host = document.createElement('div'); host.id = 'sqns-medzapis';
     document.body.appendChild(host);
     root = host.attachShadow({ mode: 'open' });
-    root.innerHTML = '<style>' + CSS + '</style>' +
+    root.innerHTML = '<style>' + CSS + ((globalThis.SQNSMZ_SVCVIEW || {}).css || '') + '</style>' +
       '<div class="tab" id="tab"><span class="ic">🦷</span><span>Медзапись</span></div>' +
       '<div class="wrap" id="wrap"><div class="shade" id="shade"></div><div class="panel" id="panel"></div></div>' +
       '<div class="toast" id="toast"></div>';
@@ -588,7 +588,8 @@
     root.getElementById('tab').onclick = () => openPanel();
     root.getElementById('shade').onclick = () => closePanel();
   }
-  function openPanel() { buildInitialState(); undoSnap = undoSnap || null; render(); wrap.classList.add('open'); isOpen = true; }
+  function openPanel() { buildInitialState(); undoSnap = undoSnap || null; render(); wrap.classList.add('open'); isOpen = true;
+    if (VIEW === 'diary' && noServices()) toast('Сначала добавьте услуги в визит', 'warn'); }
   function closePanel() { wrap.classList.remove('open'); isOpen = false; }
   function toast(msg, lvl) {
     const t = root.getElementById('toast'); t.textContent = msg; t.className = 'toast show ' + (lvl || 'ok');
@@ -695,8 +696,33 @@
       (svcT.size ? '<span class="hint"><span class="sdot"></span> зуб есть в услугах</span>' : '') + '</div></div>';
   }
 
+  // ---- вкладки панели: «Дневник» (медзапись) и «Услуги» (svc-engine.js) ----
+  let VIEW = LS.get('view', 'diary');
+  const SVCV = () => globalThis.SQNSMZ_SVCVIEW || null;
+  const noServices = () => S && !S.services.length && !S.blocks.some((b) => !tplById(b.tpl).fixed) && !S.manualOk;
+  const SVC_API = {
+    toast: (m, l) => toast(m, l), rerender: () => render(), rebuild: () => buildInitialState(),
+    fmtTooth, marks: () => fMarks(), page: () => PAGE,
+    gotoDiary: () => { VIEW = 'diary'; LS.set('view', VIEW); buildInitialState(); render(); },
+  };
+  const viewTabs = () => SVCV() ? '<div class="vtabs"><button data-view="diary" class="' + (VIEW === 'diary' ? 'on' : '') + '">📝 Дневник</button><button data-view="svc" class="' + (VIEW === 'svc' ? 'on' : '') + '">🧾 Услуги</button></div>' : '';
+  function bindViews(P) {
+    P.querySelectorAll('[data-view]').forEach((el) => el.addEventListener('click', (e) => { VIEW = e.currentTarget.dataset.view; LS.set('view', VIEW); buildInitialState(); render(); }));
+  }
+  function renderSvc(P) {
+    const prevScroll = P.querySelector('.body') ? P.querySelector('.body').scrollTop : 0;
+    const v = SVCV().render(SVC_API);
+    P.innerHTML = '<div class="hd"><div style="font-size:26px">🧾</div><h1>Услуги визита<small>услуг в визите: ' + S.services.length + ' · v' + ENGINE_VERSION + '</small></h1>' +
+      '<button class="x" id="refresh" title="Перечитать страницу">↻</button><button class="x" id="close">×</button></div><div class="body">' + viewTabs() + v.body + '</div><div class="ft">' + v.foot + '</div>';
+    P.querySelector('#close').onclick = closePanel;
+    P.querySelector('#refresh').onclick = () => { buildInitialState(); render(); toast('Данные страницы перечитаны'); };
+    bindViews(P); SVCV().bind(P, SVC_API);
+    const body = P.querySelector('.body'); if (body) body.scrollTop = prevScroll;
+  }
   function render() {
     const P = root.getElementById('panel'); const ctx = getCtx();
+    if (!S) buildInitialState();
+    if (VIEW === 'svc' && SVCV()) { renderSvc(P); return; }
     const prevScroll = P.querySelector('.body') ? P.querySelector('.body').scrollTop : 0;
     if (!S) buildInitialState();
     const pi = positionInfo(); const ti = timeInfo(ctx); const iss = issues(ctx); const hasBad = iss.some((i) => i.lvl === 'bad' && !/код не подтверждён/.test(i.text));
@@ -704,7 +730,13 @@
     const R = compose();
 
     let h = '<div class="hd"><div style="font-size:26px">🦷</div><h1>Медзапись<small>' +
-      (ctx ? (ctx.list.length > 1 ? 'Дневников в визите: ' + ctx.list.length : 'Дневник найден') + ' · услуг в визите: ' + S.services.length : 'Дневник не найден') + ' · v' + ENGINE_VERSION + '</small></h1><button class="x" id="refresh" title="Перечитать страницу (планы, формулу, услуги)">↻</button><button class="x" id="close">×</button></div><div class="body">';
+      (ctx ? (ctx.list.length > 1 ? 'Дневников в визите: ' + ctx.list.length : 'Дневник найден') + ' · услуг в визите: ' + S.services.length : 'Дневник не найден') + ' · v' + ENGINE_VERSION + '</small></h1><button class="x" id="refresh" title="Перечитать страницу (планы, формулу, услуги)">↻</button><button class="x" id="close">×</button></div><div class="body">' + viewTabs();
+
+    if (noServices() && SVCV()) {
+      h += '<div class="card empty">Сначала добавьте услуги в визит —<br>по ним подберутся шаблоны дневника.<br><br>' +
+        '<button class="btn pri" data-view="svc" style="flex:none">🧾 Перейти к услугам</button><br><br><button class="link" id="manualok">Заполнить дневник вручную</button></div></div>';
+      P.innerHTML = h; bind(P); return;
+    }
 
     if (!ctx) {
       h += '<div class="card empty">Откройте визит пациента.<br>Если дневника ещё нет — создам его со стандартным шаблоном.<br><br>' +
@@ -813,6 +845,8 @@
     on('[data-jpick]', 'click', (e) => { JPICK = +e.currentTarget.dataset.jpick; undoSnap = null; buildInitialState(); render(); });
     if (q('rescan')) q('rescan').onclick = () => { buildInitialState(); render(); };
     if (q('refresh')) q('refresh').onclick = () => { buildInitialState(); render(); toast('Данные страницы перечитаны'); };
+    bindViews(P);
+    if (q('manualok')) q('manualok').onclick = () => { S.manualOk = true; render(); };
     if (q('insert')) q('insert').onclick = doInsert;
     if (q('undo')) q('undo').onclick = doUndo;
     if (q('dur')) q('dur').onchange = (e) => { S.duration = Math.max(5, +e.target.value || DEFAULT_DURATION); render(); };

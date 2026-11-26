@@ -2,6 +2,9 @@
  * Сценарии — в services.js. Панель и общие функции — в engine.js (он вызывает render/bind отсюда).
  * Запись идёт теми же функциями SQNS, что и ручной ввод: addItem → serviceChanged(карточка) → setTeeth → количество.
  * Визит не сохраняется: кнопку «Сохранить» нажимает врач.
+ * Типы полей сценария, кроме описанных в services.js: group — раскрывающийся блок (выключатель в заголовке, внутри — поля с grp),
+ *   stock — плашки-счётчики (клик +1, «−» убирает), toothSet (compact — свёрнутая строка с «Изменить», hl — пунктирная подсветка),
+ *   perTooth с teethFrom — выбор по зубам другого набора, counter с default null — пусто, пока врач не укажет (need — красное).
  */
 (function () {
   'use strict';
@@ -117,9 +120,9 @@
   }
   function fresh(id) {
     const sc = scnById(id);
-    const st = { scn: id, teeth: [], params: {}, touched: {}, ctouched: {}, more: {}, busy: false, done: null, error: '' };
+    const st = { scn: id, teeth: [], params: {}, touched: {}, ctouched: {}, more: {}, tsOpen: {}, busy: false, done: null, error: '' };
     (sc ? sc.params : []).forEach((pr) => {
-      if (pr.type === 'perTooth' || pr.type === 'teethCards' || pr.type === 'canals') st.params[pr.key] = {};
+      if (pr.type === 'perTooth' || pr.type === 'teethCards' || pr.type === 'canals' || pr.type === 'stock') st.params[pr.key] = {};
       else if (pr.default !== undefined) st.params[pr.key] = clone(pr.default);
       else if (pr.type === 'counter') st.params[pr.key] = pr.min || 0;
       else if (pr.type === 'toggle') st.params[pr.key] = false;
@@ -135,8 +138,9 @@
     sc.params.forEach((pr) => {
       if (pr.type === 'perTooth' || pr.type === 'teethCards' || pr.type === 'canals') {
         const m = st.params[pr.key] = st.params[pr.key] || {};
-        Object.keys(m).forEach((t) => { if (!st.teeth.includes(t)) delete m[t]; });
-        st.teeth.forEach((t) => {
+        const src = pr.teethFrom ? (st.params[pr.teethFrom] || []).map(String) : st.teeth;   // perTooth может идти по зубам другого набора
+        Object.keys(m).forEach((t) => { if (!src.includes(t)) delete m[t]; });
+        src.forEach((t) => {
           if (pr.type === 'canals') { if (!m[t] || !st.ctouched[t]) m[t] = pr.auto(t); return; }
           if (!m[t]) m[t] = pr.type === 'perTooth' ? (pr.default || pr.options[0].v) : cardDefaults(pr);
           if (pr.type === 'teethCards') normCard(pr, m[t], canalsOf(st, t));
@@ -148,8 +152,14 @@
   }
   // Параметры для расчёта: скрытые (show = false) поля карточек считаются выключенными
   const OFF = { toggle: false, opt: null, seg: null, split: null, count: 0, fillings: [] };
+  // Поля раскрывающегося блока (grp): выключен блок или само поле скрыто — в расчёт не идут
+  const OFFP = { toggle: false, opt: null, seg: null, counter: 0, toothSet: [], stock: {}, perTooth: {} };
   function effParams() {
     const sc = scnById(SS.scn), out = Object.assign({}, SS.params);
+    sc.params.forEach((pr) => {
+      if (!pr.grp || !(pr.type in OFFP)) return;
+      if (!SS.params[pr.grp] || (pr.show && !pr.show(SS.params))) out[pr.key] = clone(OFFP[pr.type]);
+    });
     sc.params.forEach((pr) => {
       if (pr.type !== 'teethCards') return;
       const m = {}; Object.keys(SS.params[pr.key] || {}).forEach((t) => {
@@ -211,6 +221,25 @@
   .canr{display:flex;align-items:center;gap:10px;margin:4px 0} .canr .tchip{min-width:40px;text-align:center}
   .mix{margin-top:5px;display:flex;flex-direction:column;gap:3px} .mixr{display:flex;align-items:center;justify-content:space-between;gap:8px} .mixr>span{font-size:12px;color:#475569}
   .muted{color:#64748b;font-size:12px}
+  .grp{margin:8px 0;border:1px solid #e2e8f0;border-radius:12px;background:#fff}
+  .grp.on{border-color:#c7d2fe;background:#fafbff}
+  .gh{display:flex;align-items:center;gap:8px;padding:8px 10px}
+  .gh .gt{flex:1;font-size:13px;font-weight:700;color:#334155} .gh .gn{font-size:11.5px;color:#4f46e5;font-weight:700}
+  .gb{padding:2px 10px 6px;border-top:1px dashed #e2e8f0}
+  .gb .row{grid-template-columns:1fr auto;margin:5px 0}
+  .gsub{margin:-2px 0 8px 8px;padding-left:10px;border-left:2px solid #e0e7ff}
+  .gsub .row{margin:4px 0} .gsub .formula.mini{margin:4px 0 2px}
+  .stock{display:flex;flex-direction:column;gap:6px;margin:4px 0 6px}
+  .stkr{display:grid;grid-template-columns:112px 1fr;gap:6px;align-items:center}
+  .stkl{font-size:12px;color:#475569;font-weight:600}
+  .stkc{display:flex;flex-wrap:wrap;gap:5px}
+  .stk{display:inline-flex;align-items:stretch;border:1.5px solid #e2e8f0;border-radius:9px;background:#fff;overflow:hidden}
+  .stk button{border:0;background:transparent;padding:5px 9px;font-size:12.5px;font-weight:600;color:#334155;cursor:pointer}
+  .stk button:hover{background:#eef2ff;color:#4338ca}
+  .stk.on{border-color:#818cf8;background:#eef2ff} .stk.on button{color:#3730a3} .stk b{font-weight:800}
+  .stk .m{border-left:1px solid #c7d2fe;padding:5px 8px;color:#64748b}
+  .stkt{font-size:12px;font-weight:700;color:#4338ca}
+  .tsr{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:6px 0} .tsr .flbl{margin:0}
   `;
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const badge = (lvl, t) => '<span class="badge ' + lvl + '"><span class="dot"></span>' + esc(t) + '</span>';
@@ -281,20 +310,55 @@
   }
 
   // мини-формула для выбора зубов отдельной услуги (attr — data-атрибут кнопок)
-  function teethGrid(API, sel, attr, title, need) {
-    const M = API.marks();
+  function teethGrid(API, sel, attr, title, need, hl, extra) {
+    const M = API.marks(), H = (hl || []).map(String);
     const lbl = (t) => (!M ? { txt: t, cls: '' } : M.missing.includes(t) ? { txt: '0', cls: ' miss' } : M.implant.includes(t) ? { txt: 'И', cls: ' impl' } : { txt: t, cls: '' });
-    const btn = (t) => { t = String(t); const L = lbl(t); return '<button class="tb' + L.cls + (sel.includes(t) ? ' on' : '') + '" ' + attr + ' data-t="' + t + '" title="' + t + '">' + L.txt + '</button>'; };
+    const btn = (t) => { t = String(t); const L = lbl(t); return '<button class="tb' + L.cls + (sel.includes(t) ? ' on' : H.includes(t) ? ' dv' : '') + '" ' + attr + ' data-t="' + t + '" title="' + t + '">' + L.txt + '</button>'; };
     const r = (a, z) => Array.from({ length: z }, (_, i) => a + i), half = (arr) => '<div class="half">' + arr.map(btn).join('') + '</div>';
     const row = (L, R) => '<div class="jaw">' + half(L) + '<div class="mid"></div>' + half(R) + '</div>';
-    return '<div class="formula mini"><div class="fh"><span class="fl">' + esc(title) + '</span><span class="fs">' + esc(sel.slice().sort().map(API.fmtTooth).join(', ')) + '</span>' + (!sel.length && need ? badge('bad', 'выберите зубы') : '') + '</div>' +
+    return '<div class="formula mini"><div class="fh"><span class="fl">' + esc(title) + '</span><span class="fs">' + esc(sel.slice().sort().map(API.fmtTooth).join(', ')) + '</span>' + (!sel.length && need ? badge('bad', 'выберите зубы') : '') + (extra || '') + '</div>' +
       row(r(11, 8).reverse(), r(21, 8)) + '<div class="occl"></div>' + row(r(41, 8).reverse(), r(31, 8)) + '</div>';
   }
+  // мини-формула отдельной услуги. compact: выбранные зубы свёрнуты в строку «… Изменить»; пусто — формула открыта
+  function renderToothSet(pr, API) {
+    const p = SS.params, sel = (p[pr.key] || []).map(String).sort(), hl = pr.hl ? pr.hl(p, SS.teeth) : [];
+    let at = pr.auto && !SS.touched[pr.key] ? (typeof pr.autoText === 'function' ? pr.autoText(p, SS.teeth) : pr.autoText) : '';
+    if (at && !sel.length) at = '';
+    const autoH = at ? '<span class="auto">● ' + esc(at) + '</span>' : '';
+    const hlH = pr.hlText && hl.length ? '<div class="hint" style="margin:-2px 4px 6px">пунктир — ' + esc(pr.hlText) + '</div>' : '';
+    if (pr.compact) {
+      const open = SS.tsOpen[pr.key] || !sel.length;
+      if (!open) return '<div class="tsr"><span class="flbl">' + esc(pr.label) + '</span><span class="fs">' + esc(sel.map(API.fmtTooth).join(', ')) + '</span>' + autoH + '<button class="link" data-stso="' + pr.key + '">Изменить</button></div>';
+      return teethGrid(API, sel, 'data-sts="' + pr.key + '"', pr.label, true, hl, (autoH ? ' ' + autoH : '') + (sel.length ? '<button class="link" data-stso="' + pr.key + '">Готово</button>' : '')) + hlH;
+    }
+    return teethGrid(API, sel, 'data-sts="' + pr.key + '"', pr.label, true, hl) + hlH + (at ? '<div class="hint" style="margin:-4px 4px 8px">● ' + esc(at) + '</div>' : '');
+  }
+  // плашки-счётчики: клик по плашке +1, «−» убирает одну; total — итог по vol (кость, см³)
+  function renderStock(pr) {
+    const v = SS.params[pr.key] || {}; let total = 0, any = false;
+    const rows = pr.rows.map((r) => '<div class="stkr"><span class="stkl">' + esc(r.l) + '</span><div class="stkc">' + r.items.map((it) => {
+      const n = +v[it.id] || 0, a = pr.key + '|' + it.id; total += n * (it.vol || 0); if (n) any = true;
+      return '<span class="stk' + (n ? ' on' : '') + '"><button data-sstk="' + a + '">' + esc(it.l) + (n ? ' <b>×' + n + '</b>' : '') + '</button>' + (n ? '<button class="m" data-sstkm="' + a + '" title="Убрать одну">−</button>' : '') + '</span>';
+    }).join('') + '</div></div>').join('');
+    return '<div class="stock">' + rows + (pr.total && total ? '<div class="stkt">Итого: ' + String(+total.toFixed(1)).replace('.', ',') + ' ' + esc(pr.unit || '') + '</div>' : '') +
+      (!any ? '<div>' + badge('bad', pr.needText || 'выберите') + '</div>' : '') + '</div>';
+  }
+  // раскрывающийся блок: выключатель в заголовке, внутри — поля с grp === key
+  function renderGroup(pr, all, API) {
+    const on = !!SS.params[pr.key], kids = all.filter((x) => x.grp === pr.key);
+    const n = kids.filter((k) => k.type === 'toggle' && SS.params[k.key]).length;
+    const sum = pr.summary ? pr.summary(SS.params) : n ? n + ' ' + plural(n, 'позиция', 'позиции', 'позиций') : '';
+    return '<div class="grp' + (on ? ' on' : '') + '"><div class="gh"><span class="gt">' + esc(pr.label) + '</span>' + (on && sum ? '<span class="gn">' + esc(sum) + '</span>' : '') +
+      '<button class="tg ' + (on ? 'on' : '') + '" data-stg="' + pr.key + '"></button></div>' + (on ? '<div class="gb">' + kids.map((k) => renderP(k, API)).join('') + '</div>' : '') + '</div>';
+  }
+  function renderP(pr, API) { const h = renderParam(pr, API); return pr.sub && h ? '<div class="gsub">' + h + '</div>' : h; }
+  const renderList = (params, API) => params.filter((pr) => !pr.grp).map((pr) => (pr.type === 'group' ? renderGroup(pr, params, API) : renderP(pr, API))).join('');
   function renderParam(pr, API) {
     const p = SS.params, v = p[pr.key];
     if (pr.show && !pr.show(p)) return '';
     if (pr.type === 'teethPick') return renderTeeth(API, pr.label);
-    if (pr.type === 'toothSet') return teethGrid(API, v || [], 'data-sts="' + pr.key + '"', pr.label, true) + (SS.touched[pr.key] ? '' : '<div class="hint" style="margin:-4px 4px 8px">● те же зубы, что в УЗ-удалении</div>');
+    if (pr.type === 'toothSet') return renderToothSet(pr, API);
+    if (pr.type === 'stock') return renderStock(pr);
     if (pr.type === 'teethCards') return renderCards(pr, API);
     if (pr.type === 'canals') return renderCanals(pr, API);
     const auto = pr.auto && !SS.touched[pr.key] && SS.teeth.length ? '<br><span class="auto">● по зубам</span>' : '';
@@ -303,10 +367,11 @@
     if (pr.type === 'seg' && pr.wide) return '<div class="wrow"><div class="flbl">' + esc(pr.label) + '</div>' + ctl + '</div>';
     else if (pr.type === 'toggle') ctl = '<button class="tg ' + (v ? 'on' : '') + '" data-stg="' + pr.key + '"></button>';
     else if (pr.type === 'opt') ctl = optH('data-sopt="' + pr.key + '"', 'data-soptv="' + pr.key + '"', pr.options, v);
-    else if (pr.type === 'counter') ctl = '<div class="cnt"><button data-scnt="' + pr.key + '" data-d="-1">−</button><b>' + (+v || 0) + '</b><button data-scnt="' + pr.key + '" data-d="1">+</button><span>' + esc(pr.unit || '') + '</span></div>';
+    else if (pr.type === 'counter') ctl = '<div class="cnt"><button data-scnt="' + pr.key + '" data-d="-1">−</button><b>' + (v == null ? '—' : +v || 0) + '</b><button data-scnt="' + pr.key + '" data-d="1">+</button><span>' + esc(pr.unit || '') + '</span>' + (v == null && pr.need ? badge('bad', 'укажите') : '') + '</div>';
     else if (pr.type === 'perTooth') {
-      if (!SS.teeth.length) return '<div class="row"><label>' + esc(pr.label) + '</label><div>' + badge('warn', 'отметьте зубы') + '</div></div>';
-      ctl = SS.teeth.slice().sort().map((t) => '<div class="ptm">' + (SS.teeth.length > 1 ? '<span class="tchip">' + API.fmtTooth(t) + '</span>' : '') + '<div class="seg">' + pr.options.map((o) => '<button data-spt="' + pr.key + '" data-t="' + t + '" data-v="' + esc(o.v) + '" class="' + ((v || {})[t] === o.v ? 'on' : '') + '">' + esc(o.l) + '</button>').join('') + '</div></div>').join('');
+      const tt = (pr.teethFrom ? (p[pr.teethFrom] || []) : SS.teeth).map(String);
+      if (!tt.length) return pr.teethFrom ? '' : '<div class="row"><label>' + esc(pr.label) + '</label><div>' + badge('warn', 'отметьте зубы') + '</div></div>';
+      ctl = tt.slice().sort().map((t) => '<div class="ptm">' + (tt.length > 1 || pr.teethFrom ? '<span class="tchip">' + API.fmtTooth(t) + '</span>' : '') + '<div class="seg">' + pr.options.map((o) => '<button data-spt="' + pr.key + '" data-t="' + t + '" data-v="' + esc(o.v) + '" class="' + ((v || {})[t] === o.v ? 'on' : '') + '">' + esc(o.l) + '</button>').join('') + '</div></div>').join('');
     }
     return '<div class="row"><label>' + esc(pr.label) + auto + '</label><div>' + ctl + '</div></div>';
   }
@@ -347,7 +412,7 @@
         '<div class="hint" style="margin:6px 0 0">Проверьте строки услуг и нажмите «Сохранить» в визите. Дневник теперь можно заполнить по этим услугам.</div></div></div>';
     }
     if (sc) {
-      h += '<div class="sec"><h2>' + esc(sc.icon + ' ' + sc.title) + '</h2><div class="card">' + (sc.needTeeth && !sc.params.some((x) => x.type === 'teethPick') ? renderTeeth(API) : '') + sc.params.map((pr) => renderParam(pr, API)).join('') + '</div></div>';
+      h += '<div class="sec"><h2>' + esc(sc.icon + ' ' + sc.title) + '</h2><div class="card">' + (sc.needTeeth && !sc.params.some((x) => x.type === 'teethPick') ? renderTeeth(API, sc.teethTitle) : '') + renderList(sc.params, API) + '</div></div>';
       const L = lines(); let total = 0, missingPrice = false;
       h += '<div class="sec"><h2>Будет добавлено</h2><div class="card cart">' + (L.length ? L.map((l) => {
         const c = CARD[l.id]; if (!c) { loadCard(l.id).then((x) => { if (x) API.rerender(); }); }
@@ -356,7 +421,7 @@
           ((l.teeth || []).length ? ' ' + l.teeth.slice().sort().map((t) => '<span class="tchip">' + API.fmtTooth(t) + '</span>').join(' ') : '') +
           (l.skip ? ' ' + badge('ok', l.skip) : l.dup ? ' ' + badge('warn', 'такая строка уже есть') : '') + '</div><div class="q">× ' + l.qty + '</div><div class="pr">' + (l.skip ? '—' : price == null ? '…' : rub(price * l.qty)) + '</div></div>';
       }).join('') + '<div class="tot"><span>Итого</span><span>' + (missingPrice ? '…' : rub(total)) + '</span></div>' : '<div class="hint">Пока нечего добавлять</div>') + '</div></div>';
-      const iss = (sc.check ? sc.check(effParams(), SS.teeth) : []);
+      const iss = (sc.check ? sc.check(effParams(), SS.teeth, { touched: SS.touched }) : []);
       if (!visitForm()) iss.unshift({ lvl: 'bad', text: 'Визит не открыт: откройте визит пациента на вкладке «История болезни»' });
       if (SS.error) iss.unshift({ lvl: 'bad', text: SS.error });
       if (iss.length) h += '<div class="sec"><h2>Проверка</h2><div class="iss">' + iss.map((i) => '<div class="' + i.lvl + '">' + (i.lvl === 'bad' ? '⛔' : '⚠️') + ' ' + esc(i.text) + '</div>').join('') + '</div></div>';
@@ -381,14 +446,18 @@
       autoParams(SS); lsSet(SS.scn); API.rerender(); });
     on('[data-stooth]', 'click', (e) => { const t = e.currentTarget.dataset.stooth; SS.teeth = SS.teeth.includes(t) ? SS.teeth.filter((x) => x !== t) : SS.teeth.concat(t); SS.done = null; re(); });
     on('[data-sts]', 'click', (e) => { const k = e.currentTarget.dataset.sts, t = e.currentTarget.dataset.t, a = (SS.params[k] || []).slice();
-      SS.params[k] = a.includes(t) ? a.filter((x) => x !== t) : a.concat(t); touch(k); re(); });
+      SS.params[k] = a.includes(t) ? a.filter((x) => x !== t) : a.concat(t); touch(k); SS.tsOpen[k] = true; re(); });
+    on('[data-stso]', 'click', (e) => { const k = e.currentTarget.dataset.stso; SS.tsOpen[k] = !SS.tsOpen[k]; API.rerender(); });
+    on('[data-sstk]', 'click', (e) => { const [k, id] = e.currentTarget.dataset.sstk.split('|'); const m = SS.params[k] = SS.params[k] || {}; m[id] = Math.min(20, (+m[id] || 0) + 1); touch(k); re(); });
+    on('[data-sstkm]', 'click', (e) => { const [k, id] = e.currentTarget.dataset.sstkm.split('|'); const m = SS.params[k] = SS.params[k] || {}; m[id] = (+m[id] || 0) - 1; if (m[id] <= 0) delete m[id]; touch(k); re(); });
     on('[data-sclear]', 'click', () => { SS.teeth = []; re(); });
     on('[data-sseg]', 'click', (e) => { const k = e.currentTarget.dataset.sseg; SS.params[k] = e.currentTarget.dataset.v; touch(k); re(); });
     on('[data-stg]', 'click', (e) => { const k = e.currentTarget.dataset.stg; SS.params[k] = !SS.params[k]; touch(k); re(); });
     on('[data-sopt]', 'click', (e) => { const k = e.currentTarget.dataset.sopt, pr = prOf(k); SS.params[k] = SS.params[k] ? null : (pr.onDefault || pr.default || pr.options[0].v); touch(k); re(); });
     on('[data-soptv]', 'click', (e) => { const k = e.currentTarget.dataset.soptv; SS.params[k] = e.currentTarget.dataset.v; touch(k); re(); });
-    on('[data-scnt]', 'click', (e) => { const k = e.currentTarget.dataset.scnt, pr = prOf(k);
-      SS.params[k] = Math.max(pr.min || 0, Math.min(pr.max || 99, (+SS.params[k] || 0) + +e.currentTarget.dataset.d)); touch(k); re(); });
+    on('[data-scnt]', 'click', (e) => { const k = e.currentTarget.dataset.scnt, pr = prOf(k), d = +e.currentTarget.dataset.d;
+      if (SS.params[k] == null && d < 0) return;                       // счётчик без значения: «−» ничего не делает
+      SS.params[k] = Math.max(pr.min || 0, Math.min(pr.max || 99, (SS.params[k] == null ? 0 : +SS.params[k]) + d)); touch(k); re(); });
     on('[data-spt]', 'click', (e) => { const d = e.currentTarget.dataset; SS.params[d.spt] = SS.params[d.spt] || {}; SS.params[d.spt][d.t] = d.v; re(); });
     on('[data-ctg]', 'click', (e) => { const x = cell(e.currentTarget.dataset.ctg); x.c[x.fk] = !x.c[x.fk]; re(); });
     on('[data-copt]', 'click', (e) => { const x = cell(e.currentTarget.dataset.copt); x.c[x.fk] = x.c[x.fk] ? null : (x.f.onDefault || x.f.options[0].v); re(); });

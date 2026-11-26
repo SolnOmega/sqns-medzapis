@@ -23,6 +23,7 @@
     2:   { code: 'B01.065.002', name: 'Приём терапевта повторный', term: 'врача-стоматолога-терапевта' },
     3:   { code: 'B01.067.001', name: 'Приём хирурга первичный', term: 'врача-стоматолога-хирурга' },
     4:   { code: 'B01.067.002', name: 'Приём хирурга повторный', term: 'врача-стоматолога-хирурга' },
+    13:  { code: 'B01.003.004.004', name: 'Аппликационная анестезия', term: 'Аппликационная анестезия' },
     9:   { code: 'A02.07.001', name: 'Изоляция: ретрактор OptraGate', term: 'OptraGate' },
     10:  { code: 'A02.07.001', name: 'Изоляция: коффердам', term: 'коффердам' },
     14:  { code: 'B01.003.004.005', name: 'Инфильтрационная анестезия (1 карпула)', term: 'Инфильтрационная анестезия' },
@@ -44,7 +45,7 @@
     33:  { code: 'A16.07.002', name: 'Композитный винир', term: 'композитный винир' },
     34:  { code: 'A16.07.031', name: 'Восстановление с анкерным штифтом (металл)', term: 'анкерных штифтов' },
     35:  { code: 'A16.07.031', name: 'Восстановление со стекловолоконным штифтом', term: 'анкерных штифтов' },
-    36:  { code: 'A16.07.025.001', name: 'Полирование композитной реставрации', term: 'Избирательное полирование' },
+    36:  { code: 'A16.07.025.001', name: 'Избирательное полирование зуба', term: 'Избирательное полирование' },
     37:  { code: 'A16.07.009', name: 'Пульпотомия (ампутация коронковой пульпы)', term: 'Пульпотомия' },
     38:  { code: 'A16.07.010', name: 'Экстирпация пульпы (1 канал)', term: 'Экстирпация пульпы' },
     40:  { code: 'A16.07.082.001', name: 'Распломбировка канала: паста (1 канал)', term: 'Распломбировка' },
@@ -62,6 +63,9 @@
     52:  { code: 'A16.07.008.002', name: 'Пломбирование гуттаперчей: четыре канала', term: 'гуттаперчевыми' },
     53:  { code: 'A16.07.008.003', name: 'Закрытие перфорации стенки корневого канала', term: 'Закрытие перфорации' },
     54:  { code: 'A16.07.008', name: 'Закрытие перфорации дна полости зуба', term: 'Закрытие перфорации' },
+    55:  { code: 'A16.07.051', name: 'Профгигиена: полный комплекс', term: 'Профессиональная гигиена' },
+    56:  { code: 'A16.07.051', name: 'Профгигиена: менее 14 зубов', term: 'Профессиональная гигиена' },
+    57:  { code: 'A22.07.002', name: 'УЗ-удаление зубных отложений (1 зуб)', term: 'Ультразвуковое удаление' },
     184: { code: 'A16.07.097', name: 'Наложение шва на слизистую оболочку рта', term: 'Наложение шва на слизистую' },
     187: { code: 'A16.07.001.002', name: 'Удаление постоянного зуба', term: 'Удаление постоянного зуба' },
     188: { code: 'A16.07.001.003', name: 'Удаление зуба сложное с разъединением корней', term: 'Удаление зуба сложное' },
@@ -90,10 +94,12 @@
   }
   const ANEST = (on) => [
     { key: 'anest', label: 'Анестезия', type: 'toggle', default: on },
+    { key: 'appl', label: 'Аппликационная', type: 'toggle', default: false },
     { key: 'infil', label: 'Инфильтрационная', unit: 'карп.', type: 'counter', min: 0, max: 8, show: (p) => p.anest, auto: (teeth) => anestDefaults(teeth).infil },
     { key: 'cond', label: 'Проводниковая', unit: 'карп.', type: 'counter', min: 0, max: 8, show: (p) => p.anest, auto: (teeth) => anestDefaults(teeth).cond },
   ];
   const anestLines = (p, L) => {
+    if (p.appl) L.push({ id: 13, qty: 1 });
     if (p.anest && +p.infil > 0) L.push({ id: 14, qty: +p.infil });
     if (p.anest && +p.cond > 0) L.push({ id: 15, qty: +p.cond });
   };
@@ -255,6 +261,35 @@
         ] },
       ],
       check: therCheck, build: therBuild,
+    },
+    {
+      id: 'hygiene', title: 'Гигиена', icon: '✨', cat: 'ther',
+      params: [
+        THER_VISIT, ...ANEST(false),
+        { key: 'iso', label: 'Изоляция', type: 'opt', options: [opt('optra', 'OptraGate')], default: 'optra' },
+        { key: 'scope', label: 'Гигиена', type: 'seg', wide: true, options: [opt('full', 'Полный комплекс'), opt('partial', 'Менее 14 зубов'), opt('teeth', 'УЗ по зубам')], default: 'full' },
+        { key: 'teethPick', label: 'УЗ-удаление отложений — зубы', type: 'teethPick', show: (p) => p.scope === 'teeth' },
+        { key: 'polish', label: 'Избирательное полирование', type: 'toggle', default: false, show: (p) => p.scope === 'teeth' },
+        { key: 'polishTeeth', label: 'Полирование — зубы', type: 'toothSet', auto: (teeth) => teeth.slice(), show: (p) => p.scope === 'teeth' && p.polish },
+      ],
+      check: (p, teeth) => {
+        const out = [];
+        if (p.scope === 'teeth' && !teeth.length) out.push({ lvl: 'bad', text: 'Отметьте зубы для УЗ-удаления отложений' });
+        if (p.scope === 'teeth' && p.polish && !(p.polishTeeth || []).length) out.push({ lvl: 'bad', text: 'Отметьте зубы для полирования' });
+        if (p.anest && !(+p.infil + +p.cond)) out.push({ lvl: 'warn', text: 'Анестезия включена, но карпул 0' });
+        return out;
+      },
+      build: (p, teeth) => {
+        const L = [{ id: p.visit === 'first' ? 1 : 2, qty: 1, skipIfCode: 'B01.065' }];
+        anestLines(p, L);
+        if (p.iso) L.push({ id: 9, qty: 1 });
+        if (p.scope === 'full') L.push({ id: 55, qty: 1 });
+        if (p.scope === 'partial') L.push({ id: 56, qty: 1 });
+        if (p.scope === 'teeth' && teeth.length) L.push({ id: 57, qty: teeth.length, teeth: teeth.slice() });
+        const pt = (p.polishTeeth || []).slice().sort();
+        if (p.scope === 'teeth' && p.polish && pt.length) L.push({ id: 36, qty: pt.length, teeth: pt });
+        return L;
+      },
     },
     {
       id: 'pulpitis', title: 'Пульпит', icon: '🔴', cat: 'ther', sub: 'Эндодонтия', needTeeth: true,

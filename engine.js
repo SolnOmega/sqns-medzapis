@@ -31,7 +31,7 @@
   const LAT = { 'А': 'A', 'В': 'B', 'С': 'C', 'Е': 'E', 'К': 'K', 'М': 'M', 'Н': 'H', 'О': 'O', 'Р': 'P', 'Т': 'T', 'Х': 'X' };
   const normCode = (name) => ((name || '').trim().split(/\s+/)[0] || '').replace(/[АВСЕКМНОРТХ]/g, (c) => LAT[c]);
 
-  const ENGINE_VERSION = '1.6.7';
+  const ENGINE_VERSION = '1.6.8';
   // В визите может быть несколько дневников: SQNS держит их все на странице (каждый со своим journalIndex).
   // Какой открыт, по странице не понять, поэтому: выбранный в панели → иначе последний пустой → иначе последний.
   let JPICK = null;   // индекс дневника, выбранный врачом в панели
@@ -159,7 +159,7 @@
     try {
       const app = document.querySelector('[ng-app]') || document.documentElement;
       const root = ng().element(app).injector().get('$rootScope');
-      let n = 0;
+      let n = 0, live = null;
       (function walk(sc) {
         if (!sc || n++ > 5000) return;
         if (Object.prototype.hasOwnProperty.call(sc, 'form') && sc.form && sc.form.dentalFormula && !out.formula) {
@@ -170,8 +170,13 @@
         }
         if (Object.prototype.hasOwnProperty.call(sc, 'treatmentPlans') && Array.isArray(sc.treatmentPlans) && !out.plans.length) out.plans = sc.treatmentPlans;
         if (Object.prototype.hasOwnProperty.call(sc, 'caseHistory') && sc.caseHistory && !out.history) out.history = sc.caseHistory;
+        if (!live && Object.prototype.hasOwnProperty.call(sc, 'changeConfigService') && typeof sc.getDentalFormulaFromService === 'function') live = sc;
         for (let c = sc.$$childHead; c; c = c.$$nextSibling) walk(c);
       })(root);
+      // живая формула из компонента SQNS: в ней уже есть несохранённые изменения (в т. ч. внесённые вкладкой «Услуги»)
+      if (live && out.formula) {
+        try { let j = live.getDentalFormulaFromService(); if (typeof j === 'string') j = JSON.parse(j); if (j && j.permanentTeeth && Object.keys(j.permanentTeeth).length) out.formula = j; } catch (e) { /* остаётся form.dentalFormula */ }
+      }
       if (!out.formula && out.history && out.history.visits && out.history.visits[0]) out.formula = out.history.visits[0].dentalFormula || null;
       const pl = out.plans[0]; if (pl) out.clientID = pl.clientInfoID;
       out.plans = out.plans.map((p) => (!(p.treatmentPlanItems || []).length && PLAN_ITEMS[p.id] ? Object.assign({}, p, { treatmentPlanItems: PLAN_ITEMS[p.id], _loaded: true }) : p));

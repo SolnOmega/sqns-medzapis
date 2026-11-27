@@ -88,6 +88,77 @@
     return NEW;
   }
 
+  /* ---------------- зубная формула: изменения по услугам ---------------- */
+  // Компонент формулы SQNS — scope с собственным changeConfigService (есть на странице и при свёрнутой формуле).
+  // changeConfigService(['36'], участок, состояние, вкл/выкл, false) — тот же путь, что ручной клик:
+  // формула меняется сразу, флаг needToSaveDentalFormula ставится сам, в базу всё уходит при сохранении визита.
+  let FCOMP = null;
+  function fComp() {
+    if (FCOMP && !FCOMP.$$destroyed && typeof FCOMP.changeConfigService === 'function') return FCOMP;
+    FCOMP = null;
+    try {
+      const root = ng().element(document.querySelector('[ng-app]') || document.documentElement).injector().get('$rootScope');
+      let n = 0;
+      (function w(x) {
+        if (!x || FCOMP || n++ > 8000) return;
+        if (own(x, 'changeConfigService') && typeof x.changeConfigService === 'function' && typeof x.getDentalFormulaFromService === 'function') { FCOMP = x; return; }
+        for (let c = x.$$childHead; c; c = c.$$nextSibling) w(c);
+      })(root);
+    } catch (e) { FCOMP = null; }
+    return FCOMP;
+  }
+  // живая формула из сервиса SQNS (с несохранёнными изменениями)
+  function fJson(s) {
+    try { let j = s.getDentalFormulaFromService(); if (typeof j === 'string') j = JSON.parse(j); return j && j.permanentTeeth && Object.keys(j.permanentTeeth).length ? j : null; } catch (e) { return null; }
+  }
+  const toothOf = (j, t) => (j.permanentTeeth || {})[t] || (j.deciduousTeeth || {})[t] || null;
+  const reMatch = (r, v) => (r instanceof RegExp ? r.test(v) : r === v);
+  // op сценария (см. services.js) → [{ t, loc, st, on }]: только то, что реально меняется и есть у этого зуба
+  function formulaChanges(j, ops) {
+    const cur = {}, want = {}, unrem = j.unremovableLocationsDueToothRemoval || ['gum', 'bone', 'default'];
+    [...new Set(ops.map((o) => String(o.t)))].forEach((t) => {
+      const L = (toothOf(j, t) || {}).locations || {};
+      Object.keys(L).forEach((l) => Object.keys((L[l] || {}).states || {}).forEach((k) => { const key = t + '|' + l + '|' + k; cur[key] = want[key] = !!(L[l].states[k] || {}).isActive; }));
+    });
+    const canalLocs = (T, n) => Object.keys(T.locations || {}).filter((l) => /^canal/.test(l) && (l !== 'canalExtra' || n >= 2));
+    ops.forEach((o) => {
+      const t = String(o.t), T = toothOf(j, t); if (!T) return;
+      Object.keys(want).forEach((key) => {
+        const [kt, l, k] = key.split('|'); if (kt !== t || !want[key]) return;
+        if (o.wipe && !unrem.includes(l)) want[key] = false;
+        (o.clear || []).forEach(([lr, sr]) => { if (reMatch(lr, l) && reMatch(sr, k)) want[key] = false; });
+      });
+      (o.set || []).forEach(([l, k]) => (l === 'canals' ? canalLocs(T, o.n || 1) : [l]).forEach((x) => { const key = t + '|' + x + '|' + k; if (key in want) want[key] = true; }));
+    });
+    return Object.keys(want).filter((k) => want[k] !== cur[k]).map((k) => { const [t, loc, st] = k.split('|'); return { t, loc, st, on: want[k] }; });
+  }
+  // запись: сначала снимаем, потом ставим; одинаковые изменения на разных зубах — одним вызовом
+  function applyChanges(s, ch) {
+    const g = {};
+    ch.forEach((c) => { const k = (c.on ? 1 : 0) + '|' + c.loc + '|' + c.st; (g[k] = g[k] || []).push(c.t); });
+    const run = () => Object.keys(g).sort().forEach((k) => { const [on, loc, st] = k.split('|'); s.changeConfigService(g[k].slice().sort(), loc, st, on === '1', false); });
+    const r = s.$root || s;
+    if (r.$$phase) run(); else s.$apply(run);
+  }
+  const invert = (ch) => ch.map((c) => Object.assign({}, c, { on: !c.on }));
+  // для предпросмотра: «3.6: + Пломбированный дентин · − Кариес»
+  function changesText(j, ch, API) {
+    const nm = (k) => { const v = ((j && j.stateNames) || {})[k]; const s = v && typeof v === 'object' ? (v.name || v.title) : v; return s || k.replace(/_/g, ' '); };
+    const by = {};
+    ch.forEach((c) => { const b = by[c.t] = by[c.t] || { on: [], off: [] }; const n = nm(c.st), a = c.on ? b.on : b.off; if (!a.includes(n)) a.push(n); });
+    return Object.keys(by).sort().map((t) => ({ t: API.fmtTooth(t), on: by[t].on, off: by[t].off }));
+  }
+  // изменения для текущего сценария: { ok, comp, j, ch, why }
+  function formulaPlan() {
+    const sc = scnById(SS.scn);
+    if (!sc || !sc.formula) return { ok: false, ch: [] };
+    const comp = fComp(), j = comp && fJson(comp);
+    if (!comp || !j) return { ok: false, ch: [], why: 'Зубная формула на странице не найдена — изменения в неё не внесутся' };
+    let ops = [];
+    try { ops = sc.formula(effParams(), SS.teeth.slice().sort()) || []; } catch (e) { console.warn('[Медзапись] формула', e); }
+    return { ok: true, comp, j, ch: formulaChanges(j, ops) };
+  }
+
   /* ---------------- состояние вкладки ---------------- */
   let SS = null;
   let OPEN_CAT;                  // открытый раздел (Терапия / Хирургия / Ортопедия)
@@ -120,7 +191,7 @@
   }
   function fresh(id) {
     const sc = scnById(id);
-    const st = { scn: id, teeth: [], params: {}, touched: {}, ctouched: {}, more: {}, tsOpen: {}, busy: false, done: null, error: '' };
+    const st = { scn: id, teeth: [], params: {}, touched: {}, ctouched: {}, more: {}, tsOpen: {}, busy: false, done: null, error: '', fon: true, fch: null, fText: null };
     (sc ? sc.params : []).forEach((pr) => {
       if (pr.type === 'perTooth' || pr.type === 'teethCards' || pr.type === 'canals' || pr.type === 'stock') st.params[pr.key] = {};
       else if (pr.default !== undefined) st.params[pr.key] = clone(pr.default);
@@ -241,6 +312,9 @@
   .stk .m{border-left:1px solid #c7d2fe;padding:5px 8px;color:#64748b}
   .stkt{font-size:12px;font-weight:700;color:#4338ca}
   .tsr{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:6px 0} .tsr .flbl{margin:0}
+  .fdiff{margin-top:6px;font-size:12.5px} .fdr{display:flex;align-items:flex-start;gap:8px;padding:4px 0;border-bottom:1px dashed #e2e8f0} .fdr:last-child{border:0}
+  .fdr .tchip{min-width:40px;text-align:center} .fdr>span:last-child{display:flex;flex-wrap:wrap;gap:4px 10px;padding-top:2px}
+  .fon{color:#15803d;font-weight:600} .foff{color:#b91c1c}
   `;
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const badge = (lvl, t) => '<span class="badge ' + lvl + '"><span class="dot"></span>' + esc(t) + '</span>';
@@ -249,6 +323,8 @@
   // выключатель + выбор варианта (значение null — выключено)
   const optH = (attrT, attrV, opts, cur) => '<div class="optc"><button class="tg ' + (cur ? 'on' : '') + '" ' + attrT + '></button>' + (cur ? segH(attrV, opts, cur) : '') + '</div>';
 
+  const fDiffH = (T) => T.map((x) => '<div class="fdr"><span class="tchip">' + esc(x.t) + '</span><span>' +
+    x.on.map((n) => '<span class="fon">+ ' + esc(n) + '</span>').concat(x.off.map((n) => '<span class="foff">− ' + esc(n) + '</span>')).join(' ') + '</span></div>').join('');
   function renderFillings(pk, f, t, list) {
     return list.map((x, i) => {
       const cls = f.classes[x.mat], need = cls && !x.cls;
@@ -411,7 +487,8 @@
     h += '</div></div>';
     if (SS.done) {
       h += '<div class="sec"><div class="card done"><b>Добавлено в визит: ' + SS.done.length + '</b>' +
-        '<div class="hint" style="margin:6px 0 0">Проверьте строки услуг и нажмите «Сохранить» в визите. Дневник теперь можно заполнить по этим услугам.</div></div></div>';
+        (SS.fText && SS.fText.length ? '<div class="fdiff" style="margin-top:8px"><div class="flbl">Внесено в зубную формулу</div>' + fDiffH(SS.fText) + '</div>' : '') +
+        '<div class="hint" style="margin:6px 0 0">Проверьте строки услуг' + (SS.fText && SS.fText.length ? ' и формулу' : '') + ' и нажмите «Сохранить» в визите. Дневник теперь можно заполнить по этим услугам.</div></div></div>';
     }
     if (sc) {
       h += '<div class="sec"><h2>' + esc(sc.icon + ' ' + sc.title) + '</h2><div class="card">' + (sc.needTeeth && !sc.params.some((x) => x.type === 'teethPick') ? renderTeeth(API, sc.teethTitle) : '') + renderList(sc.params, API) + '</div></div>';
@@ -423,6 +500,14 @@
           ((l.teeth || []).length ? ' ' + l.teeth.slice().sort().map((t) => '<span class="tchip">' + API.fmtTooth(t) + '</span>').join(' ') : '') +
           (l.skip ? ' ' + badge('ok', l.skip) : l.dup ? ' ' + badge('warn', 'такая строка уже есть') : '') + '</div><div class="q">× ' + l.qty + '</div><div class="pr">' + (l.skip ? '—' : price == null ? '…' : rub(price * l.qty)) + '</div></div>';
       }).join('') + '<div class="tot"><span>Итого</span><span>' + (missingPrice ? '…' : rub(total)) + '</span></div>' : '<div class="hint">Пока нечего добавлять</div>') + '</div></div>';
+      // зубная формула: переключатель (по умолчанию вкл.) и что изменится
+      if (sc.formula && !SS.done) {
+        const F = formulaPlan(), T = F.ok ? changesText(F.j, F.ch, API) : [];
+        h += '<div class="sec"><h2>Зубная формула</h2><div class="card"><div class="row" style="grid-template-columns:1fr auto;margin:0"><label>Внести изменения в зубную формулу</label><div><button class="tg ' + (SS.fon ? 'on' : '') + '" data-sfon="1"></button></div></div>' +
+          (!SS.fon ? '' : !F.ok ? '<div style="margin-top:6px">' + badge('warn', F.why || 'формула недоступна') + '</div>'
+            : T.length ? '<div class="fdiff">' + fDiffH(T) + '</div>' : '<div class="hint" style="margin:6px 0 0">' + (SS.teeth.length ? 'Всё уже отмечено — менять нечего' : 'Отметьте зубы') + '</div>') +
+          '</div></div>';
+      }
       const iss = (sc.check ? sc.check(effParams(), SS.teeth, { touched: SS.touched }) : []);
       if (!visitForm()) iss.unshift({ lvl: 'bad', text: 'Визит не открыт: откройте визит пациента на вкладке «История болезни»' });
       if (SS.error) iss.unshift({ lvl: 'bad', text: SS.error });
@@ -453,6 +538,7 @@
     on('[data-sstk]', 'click', (e) => { const [k, id] = e.currentTarget.dataset.sstk.split('|'); const m = SS.params[k] = SS.params[k] || {}; m[id] = Math.min(20, (+m[id] || 0) + 1); touch(k); re(); });
     on('[data-sstkm]', 'click', (e) => { const [k, id] = e.currentTarget.dataset.sstkm.split('|'); const m = SS.params[k] = SS.params[k] || {}; m[id] = (+m[id] || 0) - 1; if (m[id] <= 0) delete m[id]; touch(k); re(); });
     on('[data-sclear]', 'click', () => { SS.teeth = []; re(); });
+    on('[data-sfon]', 'click', () => { SS.fon = !SS.fon; API.rerender(); });
     on('[data-sseg]', 'click', (e) => { const k = e.currentTarget.dataset.sseg; SS.params[k] = e.currentTarget.dataset.v; touch(k); re(); });
     on('[data-stg]', 'click', (e) => { const k = e.currentTarget.dataset.stg; SS.params[k] = !SS.params[k]; touch(k); re(); });
     on('[data-sopt]', 'click', (e) => { const k = e.currentTarget.dataset.sopt, pr = prOf(k); SS.params[k] = SS.params[k] ? null : (pr.onDefault || pr.default || pr.options[0].v); touch(k); re(); });
@@ -506,7 +592,17 @@
         created.push(await addOne(vf, l, rec));
       }
       SS.done = created; SS.vf = vf;
-      API.toast('Добавлено услуг: ' + created.length + '. Проверьте и сохраните визит.', 'ok');
+      // зубная формула — только если все услуги добавились
+      let fMsg = '';
+      SS.fch = null; SS.fText = null;
+      if (SS.fon) {
+        const F = formulaPlan();
+        if (F.ok && F.ch.length) {
+          try { applyChanges(F.comp, F.ch); SS.fch = F.ch; SS.fComp = F.comp; SS.fText = changesText(F.j, F.ch, API); fMsg = ', зубная формула обновлена'; }
+          catch (e) { console.warn('[Медзапись] запись формулы', e); fMsg = '. Формулу обновить не удалось'; }
+        } else if (!F.ok && F.why) fMsg = '. Формула на странице не найдена — не обновлена';
+      }
+      API.toast('Добавлено услуг: ' + created.length + fMsg + '. Проверьте и сохраните визит.', 'ok');
     } catch (e) {
       SS.error = String(e && e.message || e); SS.done = created.length ? created : null; SS.vf = visitForm();
       API.toast('Ошибка: ' + SS.error, 'bad');
@@ -517,8 +613,14 @@
     const vf = SS.vf || visitForm(); if (!vf || !SS.done) return;
     SS.done.forEach((it) => { try { vf.removeRow(it); } catch (e) { /* */ } });
     applyRoot(vf);
-    SS.done = null; API.rebuild(); API.rerender(); API.toast('Добавленные строки удалены', 'ok');
+    let fMsg = '';
+    if (SS.fch && SS.fch.length) {
+      const comp = (SS.fComp && !SS.fComp.$$destroyed) ? SS.fComp : fComp();
+      try { if (!comp) throw new Error('нет формулы'); applyChanges(comp, invert(SS.fch)); fMsg = ', изменения формулы отменены'; }
+      catch (e) { fMsg = '. Формулу вернуть не удалось — проверьте её вручную'; }
+    }
+    SS.done = null; SS.fch = null; SS.fText = null; API.rebuild(); API.rerender(); API.toast('Добавленные строки удалены' + fMsg, 'ok');
   }
 
-  globalThis.SQNSMZ_SVCVIEW = { css: CSS, render, bind, _test: { lines: () => lines(), state: () => SS, reset: () => { SS = null; }, CARD } };
+  globalThis.SQNSMZ_SVCVIEW = { css: CSS, render, bind, _test: { lines: () => lines(), state: () => SS, reset: () => { SS = null; }, CARD, formulaChanges, formulaPlan, changesText } };
 })();

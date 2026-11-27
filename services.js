@@ -168,6 +168,36 @@
   const PASS = { bad: 45, good: 44 };
   const RETREAT = { paste: 40, gutta: 41, res: 42 };
 
+  /* ---------------- зубная формула ---------------- */
+  // Что услуги сценария меняют в зубной формуле SQNS (formula(p, teeth) → список op).
+  // op: { t, set: [[участок, состояние]], clear: [[участок, состояние]], wipe, n }
+  //   участок и состояние в clear — строка или RegExp; участок 'canals' в set — все каналы зуба
+  //   (дополнительный канал — только если каналов 2 и больше; n — число каналов);
+  //   wipe — снять всё, кроме участков, которые остаются у удалённого зуба (десна, кость, имплантация).
+  //   Сначала снимается (wipe, clear), потом ставится (set). Ставится только то, что есть у этого зуба в SQNS.
+  const CARIES = [/^(crown|surface)/, /caries/];
+  const FX = {
+    filling: (t) => ({ t, set: [['crown', 'dentin_filling']], clear: [CARIES] }),          // все пломбы — «дентин», один цвет
+    canalsTemp: (t, n) => ({ t, n, set: [['canals', 'sealed_channel']] }),                   // временно пломбированный канал
+    canalsDone: (t, n) => ({ t, n, clear: [[/^canal/, /^(sealed_channel|pulpitis|periodontitis)$/]], set: [['canals', 'endodontically_treated']] }),
+    removed: (t) => ({ t, wipe: true, set: [['default', 'removed'], ['crown', 'removed']] }),
+    implant: (t) => ({ t, wipe: true, clear: [['default', 'removed']], set: [['implantationImplant', 'dental_implantation']] }),
+    gumFormer: (t) => ({ t, set: [['implantationImplant', 'gum_former'], ['implantationCrown', 'gum_former']] }),
+    gumFormerOff: (t) => ({ t, clear: [[/^implantation/, 'gum_former']] }),
+  };
+  // терапия: пломба, временное пломбирование каналов, пломбирование каналов
+  function therFormula(p, teeth) {
+    const ops = [];
+    teeth.forEach((t) => {
+      const c = (p.tooth || {})[t]; if (!c) return;
+      const N = Math.max(1, +((p.canals || {})[t]) || 1);
+      if (c.tempFill) ops.push(FX.canalsTemp(t, N));
+      if (c.obtur) ops.push(FX.canalsDone(t, N));
+      if ((c.fills || []).some((x) => fillSvc(x))) ops.push(FX.filling(t));
+    });
+    return ops;
+  }
+
   // split: { mode: вариант | 'mix' | null, n: { вариант: кол-во } } → сколько каналов каждого вида
   function splitCounts(s, N) {
     if (!s || !s.mode) return null;
@@ -416,6 +446,7 @@
         sutLines(p, L);
         return L;
       },
+      formula: (p) => IM.formula(p),
     };
   }
 
@@ -441,6 +472,7 @@
       if (p.fdm) push(L, teethLine(215, sorted(p.fdmTeeth)));
       if (p.abut) push(L, teethLine(ABUT[p.abut], sorted(p.abutTeeth)));
     };
+    const formula = (p) => (p.fdm ? sorted(p.fdmTeeth).map(FX.gumFormer) : []).concat(p.abut ? sorted(p.abutTeeth).map(FX.gumFormerOff) : []);
     const check = (p, implT, out) => {
       const F = p.fdm ? sorted(p.fdmTeeth) : [], A = p.abut ? sorted(p.abutTeeth) : [];
       if (p.fdm && !F.length) out.push({ lvl: 'bad', text: 'Формирователь десны: отметьте зубы' });
@@ -449,7 +481,7 @@
       const foreign = uniq(F.concat(A)).filter((t) => !implT.includes(t));
       if (foreign.length) out.push({ lvl: 'warn', text: 'Формирователь / абатмент на ' + foreign.map(fmt).join(', ') + ' — эти зубы не отмечены как имплантаты' });
     };
-    return { params, lines, check };
+    return { params, lines, check, formula };
   }
   const IMPL_SUPRA = SUPRA();
   // Одномоментная установка имплантатов внутри другой операции (синус-лифтинг, НКР): по умолчанию выкл.,
@@ -470,7 +502,8 @@
       if (!it(p).length) out.push({ lvl: 'bad', text: 'Установка имплантатов: отметьте зубы' });
       sup.check(p, it(p), out);
     };
-    return { params, lines, supraLines, check, teeth: (p) => (p[G] ? it(p) : []) };
+    const formula = (p) => (p[G] ? it(p).map(FX.implant).concat(sup.formula(p)) : []);
+    return { params, lines, supraLines, check, formula, teeth: (p) => (p[G] ? it(p) : []) };
   }
   const IMPL_EXT = EXTRACT({ hl: (p, teeth) => teeth, hlText: 'зубы имплантатов' });
   const IMPL_GRAFT = GRAFT();
@@ -495,7 +528,7 @@
           { key: 'tempOff', label: 'Снятие временной пломбы', type: 'toggle', default: false, adv: true },
         ] },
       ],
-      check: therCheck, build: therBuild,
+      check: therCheck, build: therBuild, formula: therFormula,
     },
     {
       id: 'hygiene', title: 'Гигиена', icon: '✨', cat: 'ther',
@@ -538,7 +571,7 @@
           ...afterCanals('obt'), ...f.rare,
         ] },
       ],
-      check: therCheck, build: therBuild,
+      check: therCheck, build: therBuild, formula: therFormula,
     },
     {
       id: 'periodontitis', title: 'Периодонтит', icon: '🟣', cat: 'ther', sub: 'Эндодонтия', needTeeth: true,
@@ -553,7 +586,7 @@
           ...afterCanals('ca'), ...f.rare,
         ] },
       ],
-      check: therCheck, build: therBuild,
+      check: therCheck, build: therBuild, formula: therFormula,
     },
     {
       id: 'recalc', title: 'Смена кальция', icon: '🔁', cat: 'ther', sub: 'Эндодонтия', needTeeth: true,
@@ -567,7 +600,7 @@
           f.tempFill(), f.tmat(),
         ] },
       ],
-      check: therCheck, build: therBuild,
+      check: therCheck, build: therBuild, formula: therFormula,
     },
     {
       id: 'obturation', title: 'Пломбировка каналов', icon: '✅', cat: 'ther', sub: 'Эндодонтия', needTeeth: true,
@@ -585,7 +618,7 @@
           ...permFields((c) => c.resto === 'perm'),
         ] },
       ],
-      check: therCheck, build: therBuild,
+      check: therCheck, build: therBuild, formula: therFormula,
     },
     {
       id: 'extraction', title: 'Удаление зуба', icon: '🔧', cat: 'surg', needTeeth: true,
@@ -615,6 +648,7 @@
         if (p.prf) { L.push({ id: 237, qty: 1 }); if (+p.tubes > 1) L.push({ id: 238, qty: +p.tubes - 1 }); }
         return L;
       },
+      formula: (p, teeth) => teeth.map(FX.removed),
     },
     {
       id: 'implant', title: 'Установка имплантатов', icon: '🔩', cat: 'surg', needTeeth: true, teethTitle: 'Зубы имплантатов',
@@ -650,6 +684,10 @@
         sutLines(p, L);
         return L;
       },
+      formula: (p, teeth) => {
+        const it = sorted(teeth), ext = p.ext ? sorted(p.extTeeth).filter((t) => !it.includes(t)) : [];
+        return ext.map(FX.removed).concat(it.map(FX.implant), IMPL_SUPRA.formula(p));
+      },
     },
     {
       id: 'fdm', title: 'Установка ФДМ (абатментов)', icon: '🪛', cat: 'surg', needTeeth: true, teethTitle: 'Имплантаты',
@@ -676,6 +714,8 @@
         sutLines(p, L);
         return L;
       },
+      // формирователь — отметка в формуле; абатмент вместо формирователя — формирователь снимается
+      formula: (p, teeth) => sorted(teeth).map((t) => (((p.put || {})[t] || 'fdm') === 'fdm' ? FX.gumFormer(t) : FX.gumFormerOff(t))),
     },
     boneScenario({
       id: 'sinus', title: 'Синус-лифтинг', icon: '🔼', ptfe: false,
@@ -692,5 +732,5 @@
     }),
   ];
 
-  globalThis.SQNSMZ_SERVICES = { SVC, CATS, SCENARIOS, SECTIONS: { ANEST, SUTURES, EXTRACT, GRAFT, SUPRA, IMPLANTS }, _test: { anestDefaults, canalsDefault, fillSvc, perToothLines, splitCounts, guideLines } };
+  globalThis.SQNSMZ_SERVICES = { SVC, CATS, SCENARIOS, SECTIONS: { ANEST, SUTURES, EXTRACT, GRAFT, SUPRA, IMPLANTS }, _test: { anestDefaults, canalsDefault, fillSvc, perToothLines, splitCounts, guideLines, therFormula, FX } };
 })();

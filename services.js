@@ -85,6 +85,8 @@
     220: { code: 'A16.07.054', name: 'Хирургический шаблон, полный протокол (более 5 имплантатов)', term: 'более 5 имплантатов' },
     221: { code: 'A16.23.042.001', name: 'Забор аутокости', term: 'забор аутокости' },
     222: { code: 'A16.07.055', name: 'Закрытый синус-лифтинг', term: 'закрытого типа' },
+    223: { code: 'A16.07.055', name: 'Открытый синус-лифтинг', term: 'открытого типа' },
+    224: { code: 'A16.07.041', name: 'Костная пластика (НКР) в области 1 зуба', term: 'в области 1 зуба без учета' },
     225: { code: 'A16.07.041', name: 'НКР в области 1 зуба при имплантации', term: 'при установке дентального имплантата' },
     226: { code: 'A16.07.041.001', name: 'Bio-Oss 0,5 см³', term: 'Bio-Oss' },
     227: { code: 'A16.07.041.001', name: 'Xenograft 0,5 см³', term: 'Xenograft' },
@@ -134,6 +136,7 @@
     if (p.anest && +p.infil > 0) L.push({ id: 14, qty: +p.infil });
     if (p.anest && +p.cond > 0) L.push({ id: 15, qty: +p.cond });
   };
+  const OPTRA = { key: 'iso', label: 'Изоляция', type: 'opt', options: [opt('optra', 'OptraGate')], default: 'optra' };
   const ISO = { key: 'iso', label: 'Изоляция', type: 'opt', options: [opt('dam', 'Коффердам'), opt('optra', 'OptraGate')], default: 'dam' };
   const THER_VISIT = { key: 'visit', label: 'Приём терапевта', type: 'seg', options: [opt('first', 'Первичный'), opt('repeat', 'Повторный')], default: 'repeat' };
 
@@ -248,8 +251,8 @@
   // общий build для терапевтических сценариев
   function therBuild(p, teeth) {
     const L = [{ id: p.visit === 'first' ? 1 : 2, qty: 1, skipIfCode: 'B01.065' }];
-    anestLines(p, L);
     if (p.iso) L.push({ id: p.iso === 'optra' ? 9 : 10, qty: 1 });
+    anestLines(p, L);
     const M = {};
     teeth.forEach((t) => {
       const c = (p.tooth || {})[t]; if (!c) return;
@@ -329,7 +332,7 @@
   function GRAFT(o) {
     o = Object.assign({ nkr: 225, nkrLabel: 'НКР в области 1 зуба', items: ['nkr', 'sinus', 'autoBone', 'bone', 'memb', 'prf', 'pins', 'screws', 'gingivo'] }, o || {});
     const G = 'graft', has = (k) => o.items.includes(k), on = (k) => (p) => !!p[k];
-    const tg = (key, label) => ({ key, label, type: 'toggle', default: false, grp: G });
+    const tg = (key, label) => ({ key, label, type: 'toggle', default: !!(o.defaults || {})[key], grp: G });
     const one = (teeth) => (teeth.length === 1 ? sorted(teeth) : []);
     const all = [];
     if (has('nkr')) all.push(tg('nkr', o.nkrLabel),
@@ -345,7 +348,7 @@
     if (has('pins')) all.push(tg('pins', 'Пины'), { key: 'pinsN', label: 'Количество', unit: 'шт.', type: 'counter', min: 1, max: 20, default: null, need: true, grp: G, sub: true, show: on('pins') });
     if (has('screws')) all.push(tg('screws', 'Винты'), { key: 'screwsN', label: 'Количество', unit: 'шт.', type: 'counter', min: 1, max: 20, default: null, need: true, grp: G, sub: true, show: on('screws') });
     if (has('gingivo')) all.push(tg('gingivo', 'Гингивопластика'));
-    const params = [{ key: G, label: o.label || 'Костная пластика', type: 'group', default: false }].concat(all);
+    const params = [{ key: G, label: o.label || 'Костная пластика', type: 'group', default: !!o.on }].concat(all);
     const stockLines = (m, rows, L) => stockIds(rows).forEach((id) => { if (+(m || {})[id] > 0) L.push({ id, qty: +m[id] }); });
     // основная часть (до формирователей/абатментов) и мягкие ткани — отдельно, чтобы строки шли по ходу операции
     const lines = (p, L) => {
@@ -375,12 +378,100 @@
     return { params, lines, soft, check };
   }
 
+  /* ---------------- костная пластика: синус-лифтинг / НКР ---------------- */
+  // Общая основа: область операции (формула), приём, изоляция, анестезия, основная услуга, швы,
+  // костная пластика (вкл., кость и мембрана вкл. и обязательны), одномоментная установка имплантатов (выкл.).
+  const BONE_ITEMS = ['autoBone', 'bone', 'memb', 'prf', 'pins', 'screws', 'gingivo'];
+  function boneScenario(o) {
+    const GR = GRAFT({ items: BONE_ITEMS, on: true, defaults: { bone: true, memb: true } });
+    const IM = IMPLANTS();
+    return {
+      id: o.id, title: o.title, icon: o.icon, cat: 'surg', needTeeth: true, teethTitle: 'Область операции',
+      params: [
+        SURG_VISIT, OPTRA,
+        ...ANEST(true, (teeth, p) => uniq(teeth.concat(IM.teeth(p)))),
+        ...(o.main || []),
+        ...SUTURES(true, { ptfe: o.ptfe }),
+        ...GR.params,
+        ...IM.params,
+      ],
+      check: (p, teeth, X) => {
+        const out = [];
+        if (!teeth.length) out.push({ lvl: 'bad', text: 'Отметьте область операции' });
+        if (p.anest && !(+p.infil + +p.cond)) out.push({ lvl: 'warn', text: 'Анестезия включена, но карпул 0' });
+        if (o.check) o.check(p, teeth, out);
+        GR.check(p, teeth, X, out);
+        IM.check(p, teeth, X, out);
+        return out;
+      },
+      build: (p, teeth) => {
+        const L = [surgVisitLine(p)];
+        if (p.iso) L.push({ id: 9, qty: 1 });
+        anestLines(p, L);
+        o.mainLines(p, sorted(teeth), L);
+        IM.lines(p, L);
+        GR.lines(p, L);
+        IM.supraLines(p, L);
+        GR.soft(p, L);
+        sutLines(p, L);
+        return L;
+      },
+    };
+  }
+
   /* ---------------- имплантация ---------------- */
   const IMPL_SYS = { osstem: 212, dentium: 213 };
   const ABUT = { temp: 117, std: 119, mu: 124 };
   // что ставим на имплантат (второй этап): формирователь или абатмент
   const ON_IMPL = { fdm: 215, temp: 117, std: 119, mu: 124 };
   const ON_IMPL_OPTS = [opt('fdm', 'ФДМ'), opt('temp', 'Временный'), opt('std', 'Стандартный'), opt('mu', 'Мультиюнит')];
+  // Формирователи / абатменты. src(teeth, p) — зубы имплантатов; grp — если секция внутри раскрывающегося блока.
+  function SUPRA(o) {
+    o = o || {};
+    const src = o.src || ((teeth) => teeth), g = o.grp ? { grp: o.grp } : {};
+    const params = [
+      Object.assign({ key: 'fdm', label: 'Формирователь десны', type: 'toggle', default: false }, g),
+      Object.assign({ key: 'fdmTeeth', label: 'Зубы', type: 'toothSet', sub: true, compact: true, show: (p) => p.fdm, auto: (teeth, p) => sorted(src(teeth, p)), autoText: 'все имплантаты' }, g),
+      Object.assign({ key: 'abut', label: 'Абатмент', type: 'opt', options: [opt('temp', 'Временный'), opt('std', 'Стандартный'), opt('mu', 'Мультиюнит')], default: null, onDefault: 'temp' }, g),
+      Object.assign({ key: 'abutTeeth', label: 'Зубы', type: 'toothSet', sub: true, compact: true, show: (p) => !!p.abut,
+        auto: (teeth, p) => sorted(src(teeth, p)).filter((t) => !(p.fdm && (p.fdmTeeth || []).includes(t))),
+        autoText: (p) => (p.fdm ? 'имплантаты без формирователя' : 'все имплантаты') }, g),
+    ];
+    const lines = (p, L) => {
+      if (p.fdm) push(L, teethLine(215, sorted(p.fdmTeeth)));
+      if (p.abut) push(L, teethLine(ABUT[p.abut], sorted(p.abutTeeth)));
+    };
+    const check = (p, implT, out) => {
+      const F = p.fdm ? sorted(p.fdmTeeth) : [], A = p.abut ? sorted(p.abutTeeth) : [];
+      if (p.fdm && !F.length) out.push({ lvl: 'bad', text: 'Формирователь десны: отметьте зубы' });
+      if (p.abut && !A.length) out.push({ lvl: 'bad', text: 'Абатмент: отметьте зубы' });
+      F.filter((t) => A.includes(t)).forEach((t) => out.push({ lvl: 'bad', text: 'Зуб ' + fmt(t) + ': отмечены и формирователь, и абатмент' }));
+      const foreign = uniq(F.concat(A)).filter((t) => !implT.includes(t));
+      if (foreign.length) out.push({ lvl: 'warn', text: 'Формирователь / абатмент на ' + foreign.map(fmt).join(', ') + ' — эти зубы не отмечены как имплантаты' });
+    };
+    return { params, lines, check };
+  }
+  const IMPL_SUPRA = SUPRA();
+  // Одномоментная установка имплантатов внутри другой операции (синус-лифтинг, НКР): по умолчанию выкл.,
+  // зубы — по умолчанию область операции; система; формирователи / абатменты
+  function IMPLANTS(o) {
+    o = o || {};
+    const G = 'impl', it = (p) => sorted(p.implTeeth);
+    const sup = SUPRA({ grp: G, src: (teeth, p) => it(p) });
+    const params = [
+      { key: G, label: o.label || 'Установка имплантатов', type: 'group', default: false, summary: (p) => it(p).map(fmt).join(', ') },
+      { key: 'implTeeth', label: 'Зубы имплантатов', type: 'toothSet', grp: G, compact: true, auto: (teeth) => sorted(teeth), autoText: 'как область операции' },
+      { key: 'sys', label: 'Система', type: 'seg', options: [opt('osstem', 'Osstem'), opt('dentium', 'Dentium')], default: 'osstem', grp: G },
+    ].concat(sup.params);
+    const lines = (p, L) => { if (p[G]) push(L, teethLine(IMPL_SYS[p.sys] || 212, it(p))); };
+    const supraLines = (p, L) => { if (p[G]) sup.lines(p, L); };
+    const check = (p, teeth, X, out) => {
+      if (!p[G]) return;
+      if (!it(p).length) out.push({ lvl: 'bad', text: 'Установка имплантатов: отметьте зубы' });
+      sup.check(p, it(p), out);
+    };
+    return { params, lines, supraLines, check, teeth: (p) => (p[G] ? it(p) : []) };
+  }
   const IMPL_EXT = EXTRACT({ hl: (p, teeth) => teeth, hlText: 'зубы имплантатов' });
   const IMPL_GRAFT = GRAFT();
   // шаблон — по одному на челюсть с имплантатами; полный протокол: до 5 / более 5 имплантатов на челюсти
@@ -397,7 +488,7 @@
     {
       id: 'caries', title: 'Кариес', icon: '🦷', cat: 'ther', needTeeth: true,
       params: [
-        THER_VISIT, ...ANEST(true), ISO,
+        THER_VISIT, ISO, ...ANEST(true),
         { key: 'tooth', label: 'По зубам', type: 'teethCards', fields: [
           f.grind, f.oldFill, f.liner(), f.post(), f.fills(), f.polish(),
           { key: 'crownTrep', label: 'Трепанация коронки (цельнолитой, МК)', type: 'toggle', default: false, adv: true },
@@ -409,8 +500,7 @@
     {
       id: 'hygiene', title: 'Гигиена', icon: '✨', cat: 'ther',
       params: [
-        THER_VISIT, ...ANEST(false),
-        { key: 'iso', label: 'Изоляция', type: 'opt', options: [opt('optra', 'OptraGate')], default: 'optra' },
+        THER_VISIT, OPTRA, ...ANEST(false),
         { key: 'scope', label: 'Гигиена', type: 'seg', wide: true, options: [opt('full', 'Полный комплекс'), opt('partial', 'Менее 14 зубов'), opt('teeth', 'УЗ по зубам')], default: 'full' },
         { key: 'teethPick', label: 'УЗ-удаление отложений — зубы', type: 'teethPick', show: (p) => p.scope === 'teeth' },
         { key: 'polish', label: 'Избирательное полирование', type: 'toggle', default: false, show: (p) => p.scope === 'teeth' },
@@ -425,8 +515,8 @@
       },
       build: (p, teeth) => {
         const L = [{ id: p.visit === 'first' ? 1 : 2, qty: 1, skipIfCode: 'B01.065' }];
-        anestLines(p, L);
         if (p.iso) L.push({ id: 9, qty: 1 });
+        anestLines(p, L);
         if (p.scope === 'full') L.push({ id: 55, qty: 1 });
         if (p.scope === 'partial') L.push({ id: 56, qty: 1 });
         if (p.scope === 'teeth' && teeth.length) L.push({ id: 57, qty: teeth.length, teeth: teeth.slice() });
@@ -438,7 +528,7 @@
     {
       id: 'pulpitis', title: 'Пульпит', icon: '🔴', cat: 'ther', sub: 'Эндодонтия', needTeeth: true,
       params: [
-        CANALS, THER_VISIT, ...ANEST(true), ISO,
+        CANALS, THER_VISIT, ISO, ...ANEST(true),
         { key: 'tooth', label: 'По зубам', type: 'teethCards', fields: [
           f.grind, f.oldFill,
           { key: 'h1', label: 'Каналы', type: 'heading' },
@@ -453,7 +543,7 @@
     {
       id: 'periodontitis', title: 'Периодонтит', icon: '🟣', cat: 'ther', sub: 'Эндодонтия', needTeeth: true,
       params: [
-        CANALS, THER_VISIT, ...ANEST(false), ISO,
+        CANALS, THER_VISIT, ISO, ...ANEST(false),
         { key: 'tooth', label: 'По зубам', type: 'teethCards', fields: [
           f.grind, f.oldFill,
           { key: 'h1', label: 'Каналы', type: 'heading' },
@@ -468,7 +558,7 @@
     {
       id: 'recalc', title: 'Смена кальция', icon: '🔁', cat: 'ther', sub: 'Эндодонтия', needTeeth: true,
       params: [
-        CANALS, THER_VISIT, ...ANEST(false), ISO,
+        CANALS, THER_VISIT, ISO, ...ANEST(false),
         { key: 'tooth', label: 'По зубам', type: 'teethCards', fields: [
           f.tempOff,
           { key: 'h1', label: 'Каналы', type: 'heading' },
@@ -482,7 +572,7 @@
     {
       id: 'obturation', title: 'Пломбировка каналов', icon: '✅', cat: 'ther', sub: 'Эндодонтия', needTeeth: true,
       params: [
-        CANALS, THER_VISIT, ...ANEST(false), ISO,
+        CANALS, THER_VISIT, ISO, ...ANEST(false),
         { key: 'tooth', label: 'По зубам', type: 'teethCards', fields: [
           f.tempOff,
           { key: 'h1', label: 'Каналы', type: 'heading' },
@@ -529,19 +619,13 @@
     {
       id: 'implant', title: 'Установка имплантатов', icon: '🔩', cat: 'surg', needTeeth: true, teethTitle: 'Зубы имплантатов',
       params: [
-        SURG_VISIT,
+        SURG_VISIT, OPTRA,
         ...ANEST(true, (teeth, p) => uniq(teeth.concat(p.ext ? p.extTeeth || [] : []))),
-        { key: 'iso', label: 'Изоляция', type: 'opt', options: [opt('optra', 'OptraGate')], default: 'optra' },
         { key: 'guide', label: 'Шаблон', type: 'opt', options: [opt('pilot', 'Пилотный'), opt('full', 'Полный протокол')], default: null, onDefault: 'pilot' },
         { key: 'sys', label: 'Система', type: 'seg', options: [opt('osstem', 'Osstem'), opt('dentium', 'Dentium')], default: 'osstem' },
         ...SUTURES(true),
         ...IMPL_EXT.params,
-        { key: 'fdm', label: 'Формирователь десны', type: 'toggle', default: false },
-        { key: 'fdmTeeth', label: 'Зубы', type: 'toothSet', sub: true, compact: true, show: (p) => p.fdm, auto: (teeth) => sorted(teeth), autoText: 'все имплантаты' },
-        { key: 'abut', label: 'Абатмент', type: 'opt', options: [opt('temp', 'Временный'), opt('std', 'Стандартный'), opt('mu', 'Мультиюнит')], default: null, onDefault: 'temp' },
-        { key: 'abutTeeth', label: 'Зубы', type: 'toothSet', sub: true, compact: true, show: (p) => !!p.abut,
-          auto: (teeth, p) => sorted(teeth).filter((t) => !(p.fdm && (p.fdmTeeth || []).includes(t))),
-          autoText: (p) => (p.fdm ? 'имплантаты без формирователя' : 'все имплантаты') },
+        ...IMPL_SUPRA.params,
         ...IMPL_GRAFT.params,
       ],
       check: (p, teeth, X) => {
@@ -549,25 +633,19 @@
         if (!teeth.length) out.push({ lvl: 'bad', text: 'Отметьте зубы имплантатов' });
         if (p.anest && !(+p.infil + +p.cond)) out.push({ lvl: 'warn', text: 'Анестезия включена, но карпул 0' });
         IMPL_EXT.check(p, teeth, X, out);
-        const F = p.fdm ? sorted(p.fdmTeeth) : [], A = p.abut ? sorted(p.abutTeeth) : [];
-        if (p.fdm && !F.length) out.push({ lvl: 'bad', text: 'Формирователь десны: отметьте зубы' });
-        if (p.abut && !A.length) out.push({ lvl: 'bad', text: 'Абатмент: отметьте зубы' });
-        F.filter((t) => A.includes(t)).forEach((t) => out.push({ lvl: 'bad', text: 'Зуб ' + fmt(t) + ': отмечены и формирователь, и абатмент' }));
-        const foreign = uniq(F.concat(A)).filter((t) => !teeth.includes(t));
-        if (foreign.length) out.push({ lvl: 'warn', text: 'Формирователь / абатмент на ' + foreign.map(fmt).join(', ') + ' — эти зубы не отмечены как имплантаты' });
+        IMPL_SUPRA.check(p, teeth, out);
         IMPL_GRAFT.check(p, teeth, X, out);
         return out;
       },
       build: (p, teeth) => {
         const L = [surgVisitLine(p)];
-        anestLines(p, L);
         if (p.iso) L.push({ id: 9, qty: 1 });
+        anestLines(p, L);
         guideLines(p, teeth, L);
         IMPL_EXT.lines(p, L);
         push(L, teethLine(IMPL_SYS[p.sys] || 212, sorted(teeth)));
         IMPL_GRAFT.lines(p, L);
-        if (p.fdm) push(L, teethLine(215, sorted(p.fdmTeeth)));
-        if (p.abut) push(L, teethLine(ABUT[p.abut], sorted(p.abutTeeth)));
+        IMPL_SUPRA.lines(p, L);
         IMPL_GRAFT.soft(p, L);
         sutLines(p, L);
         return L;
@@ -577,7 +655,7 @@
       id: 'fdm', title: 'Установка ФДМ (абатментов)', icon: '🪛', cat: 'surg', needTeeth: true, teethTitle: 'Имплантаты',
       params: [
         SURG_VISIT,
-        { key: 'iso', label: 'Изоляция', type: 'opt', options: [opt('optra', 'OptraGate')], default: 'optra' },
+        OPTRA,
         ...ANEST(true),
         { key: 'put', label: 'Устанавливаем', type: 'perTooth', wide: true, options: ON_IMPL_OPTS, default: 'fdm' },
         ...SUTURES(true, { ptfe: false }),
@@ -591,15 +669,28 @@
       },
       build: (p, teeth) => {
         const L = [surgVisitLine(p)];
-        anestLines(p, L);
         if (p.iso) L.push({ id: 9, qty: 1 });
+        anestLines(p, L);
         Object.keys(ON_IMPL).forEach((k) => push(L, teethLine(ON_IMPL[k], sorted(teeth).filter((t) => ((p.put || {})[t] || 'fdm') === k))));
         if (p.gingivo) L.push({ id: 211, qty: 1 });
         sutLines(p, L);
         return L;
       },
     },
+    boneScenario({
+      id: 'sinus', title: 'Синус-лифтинг', icon: '🔼', ptfe: false,
+      // открытый синус-лифтинг — одна услуга на операцию, сколько бы зубов ни было в области
+      mainLines: (p, teeth, L) => L.push({ id: 223, qty: 1, teeth }),
+      check: (p, teeth, out) => { const low = teeth.filter((t) => /^[34]/.test(t)); if (low.length) out.push({ lvl: 'warn', text: 'Синус-лифтинг: в области зубы нижней челюсти — ' + low.map(fmt).join(', ') }); },
+    }),
+    boneScenario({
+      id: 'nkr', title: 'НКР', icon: '🦴', ptfe: true,
+      // по умолчанию по одной услуге на зуб; хирург может посчитать соседние зубы одной областью
+      main: [{ key: 'nkrN', label: 'Костная пластика (НКР)', unit: 'обл.', type: 'counter', min: 1, max: 16, auto: (teeth) => Math.max(1, teeth.length) }],
+      mainLines: (p, teeth, L) => L.push({ id: 224, qty: Math.max(1, +p.nkrN || 1), teeth }),
+      check: (p, teeth, out) => { if (teeth.length && +p.nkrN > teeth.length) out.push({ lvl: 'warn', text: 'НКР: областей ' + p.nkrN + ', а зубов в области ' + teeth.length }); },
+    }),
   ];
 
-  globalThis.SQNSMZ_SERVICES = { SVC, CATS, SCENARIOS, SECTIONS: { ANEST, SUTURES, EXTRACT, GRAFT }, _test: { anestDefaults, canalsDefault, fillSvc, perToothLines, splitCounts, guideLines } };
+  globalThis.SQNSMZ_SERVICES = { SVC, CATS, SCENARIOS, SECTIONS: { ANEST, SUTURES, EXTRACT, GRAFT, SUPRA, IMPLANTS }, _test: { anestDefaults, canalsDefault, fillSvc, perToothLines, splitCounts, guideLines } };
 })();

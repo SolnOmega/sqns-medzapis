@@ -178,12 +178,26 @@
   const CARIES = [/^(crown|surface)/, /caries/];
   const FX = {
     filling: (t) => ({ t, set: [['crown', 'dentin_filling']], clear: [CARIES] }),          // все пломбы — «дентин», один цвет
-    canalsTemp: (t, n) => ({ t, n, set: [['canals', 'sealed_channel']] }),                   // временно пломбированный канал
-    canalsDone: (t, n) => ({ t, n, clear: [[/^canal/, /^(sealed_channel|pulpitis|periodontitis)$/]], set: [['canals', 'endodontically_treated']] }),
+    // временно пломбированный канал; пульпит снимается со всего зуба (пульпа удалена), периодонтит остаётся до пломбирования
+    canalsTemp: (t, n) => ({ t, n, clear: [[/./, 'pulpitis']], set: [['canals', 'sealed_channel']] }),
+    // каналы запломбированы: снимаются временная пломбировка, пульпит и периодонтит — на всех участках зуба
+    canalsDone: (t, n) => ({ t, n, clear: [[/^canal/, 'sealed_channel'], [/./, /^(pulpitis|periodontitis)$/]], set: [['canals', 'endodontically_treated']] }),
     removed: (t) => ({ t, wipe: true, set: [['default', 'removed'], ['crown', 'removed']] }),
     implant: (t) => ({ t, wipe: true, clear: [['default', 'removed']], set: [['implantationImplant', 'dental_implantation']] }),
     gumFormer: (t) => ({ t, set: [['implantationImplant', 'gum_former'], ['implantationCrown', 'gum_former']] }),
     gumFormerOff: (t) => ({ t, clear: [[/^implantation/, 'gum_former']] }),
+  };
+  // Подсказка в формуле выбора зубов: какие зубы подсветить пунктиром по формуле пациента. Только подсветка, ничего не выбирается.
+  // S — активные состояния зуба: ['crown:dentin_caries', 'canalMain:pulpitis', …]
+  const hasSt = (S, re) => S.some((x) => re.test(x.split(':')[1]));
+  const alive = (S) => !S.includes('default:removed') && !hasSt(S, /^dental_implantation$/);   // скрытые состояния удалённого зуба не в счёт
+  const HINT = {
+    caries: { text: 'кариес по формуле', test: (S) => alive(S) && hasSt(S, /caries/) },
+    pulpitis: { text: 'пульпит по формуле', test: (S) => alive(S) && hasSt(S, /^pulpitis$/) },
+    periodontitis: { text: 'периодонтит по формуле', test: (S) => alive(S) && hasSt(S, /^periodontitis$/) },
+    tempCanals: { text: 'временно пломбированные каналы по формуле', test: (S) => alive(S) && hasSt(S, /^sealed_channel$/) },
+    missing: { text: 'отсутствующие зубы по формуле', test: (S) => S.includes('default:removed') && !hasSt(S, /^(dental_implantation|bridge_intermediate)$/) },
+    noFormer: { text: 'имплантаты без формирователя', test: (S) => hasSt(S, /^dental_implantation$/) && !hasSt(S, /^gum_former$/) },
   };
   // терапия: пломба, временное пломбирование каналов, пломбирование каналов
   function therFormula(p, teeth) {
@@ -416,7 +430,7 @@
     const GR = GRAFT({ items: BONE_ITEMS, on: true, defaults: { bone: true, memb: true } });
     const IM = IMPLANTS();
     return {
-      id: o.id, title: o.title, icon: o.icon, cat: 'surg', needTeeth: true, teethTitle: 'Область операции',
+      id: o.id, title: o.title, icon: o.icon, cat: 'surg', hint: HINT.missing, needTeeth: true, teethTitle: 'Область операции',
       params: [
         SURG_VISIT, OPTRA,
         ...ANEST(true, (teeth, p) => uniq(teeth.concat(IM.teeth(p)))),
@@ -519,7 +533,7 @@
 
   const SCENARIOS = [
     {
-      id: 'caries', title: 'Кариес', icon: '🦷', cat: 'ther', needTeeth: true,
+      id: 'caries', title: 'Кариес', icon: '🦷', cat: 'ther', hint: HINT.caries, needTeeth: true,
       params: [
         THER_VISIT, ISO, ...ANEST(true),
         { key: 'tooth', label: 'По зубам', type: 'teethCards', fields: [
@@ -559,7 +573,7 @@
       },
     },
     {
-      id: 'pulpitis', title: 'Пульпит', icon: '🔴', cat: 'ther', sub: 'Эндодонтия', needTeeth: true,
+      id: 'pulpitis', title: 'Пульпит', icon: '🔴', cat: 'ther', hint: HINT.pulpitis, sub: 'Эндодонтия', needTeeth: true,
       params: [
         CANALS, THER_VISIT, ISO, ...ANEST(true),
         { key: 'tooth', label: 'По зубам', type: 'teethCards', fields: [
@@ -574,7 +588,7 @@
       check: therCheck, build: therBuild, formula: therFormula,
     },
     {
-      id: 'periodontitis', title: 'Периодонтит', icon: '🟣', cat: 'ther', sub: 'Эндодонтия', needTeeth: true,
+      id: 'periodontitis', title: 'Периодонтит', icon: '🟣', cat: 'ther', hint: HINT.periodontitis, sub: 'Эндодонтия', needTeeth: true,
       params: [
         CANALS, THER_VISIT, ISO, ...ANEST(false),
         { key: 'tooth', label: 'По зубам', type: 'teethCards', fields: [
@@ -589,7 +603,7 @@
       check: therCheck, build: therBuild, formula: therFormula,
     },
     {
-      id: 'recalc', title: 'Смена кальция', icon: '🔁', cat: 'ther', sub: 'Эндодонтия', needTeeth: true,
+      id: 'recalc', title: 'Смена кальция', icon: '🔁', cat: 'ther', hint: HINT.tempCanals, sub: 'Эндодонтия', needTeeth: true,
       params: [
         CANALS, THER_VISIT, ISO, ...ANEST(false),
         { key: 'tooth', label: 'По зубам', type: 'teethCards', fields: [
@@ -603,7 +617,7 @@
       check: therCheck, build: therBuild, formula: therFormula,
     },
     {
-      id: 'obturation', title: 'Пломбировка каналов', icon: '✅', cat: 'ther', sub: 'Эндодонтия', needTeeth: true,
+      id: 'obturation', title: 'Пломбировка каналов', icon: '✅', cat: 'ther', hint: HINT.tempCanals, sub: 'Эндодонтия', needTeeth: true,
       params: [
         CANALS, THER_VISIT, ISO, ...ANEST(false),
         { key: 'tooth', label: 'По зубам', type: 'teethCards', fields: [
@@ -651,7 +665,7 @@
       formula: (p, teeth) => teeth.map(FX.removed),
     },
     {
-      id: 'implant', title: 'Установка имплантатов', icon: '🔩', cat: 'surg', needTeeth: true, teethTitle: 'Зубы имплантатов',
+      id: 'implant', title: 'Установка имплантатов', icon: '🔩', cat: 'surg', hint: HINT.missing, needTeeth: true, teethTitle: 'Зубы имплантатов',
       params: [
         SURG_VISIT, OPTRA,
         ...ANEST(true, (teeth, p) => uniq(teeth.concat(p.ext ? p.extTeeth || [] : []))),
@@ -690,7 +704,7 @@
       },
     },
     {
-      id: 'fdm', title: 'Установка ФДМ (абатментов)', icon: '🪛', cat: 'surg', needTeeth: true, teethTitle: 'Имплантаты',
+      id: 'fdm', title: 'Установка ФДМ (абатментов)', icon: '🪛', cat: 'surg', hint: HINT.noFormer, needTeeth: true, teethTitle: 'Имплантаты',
       params: [
         SURG_VISIT,
         OPTRA,
@@ -732,5 +746,5 @@
     }),
   ];
 
-  globalThis.SQNSMZ_SERVICES = { SVC, CATS, SCENARIOS, SECTIONS: { ANEST, SUTURES, EXTRACT, GRAFT, SUPRA, IMPLANTS }, _test: { anestDefaults, canalsDefault, fillSvc, perToothLines, splitCounts, guideLines, therFormula, FX } };
+  globalThis.SQNSMZ_SERVICES = { SVC, CATS, SCENARIOS, SECTIONS: { ANEST, SUTURES, EXTRACT, GRAFT, SUPRA, IMPLANTS }, _test: { anestDefaults, canalsDefault, fillSvc, perToothLines, splitCounts, guideLines, therFormula, FX, HINT } };
 })();

@@ -454,16 +454,31 @@
     return '<div class="row"><label>' + esc(pr.label) + auto + '</label><div>' + ctl + '</div></div>';
   }
 
+  // активные состояния по зубам (живая формула, иначе формула страницы): { '36': ['crown:dentin_caries', …] }
+  function fStates(API) {
+    const comp = fComp(), pg = API.page && API.page();
+    const j = (comp && fJson(comp)) || (pg && pg.formula) || null;
+    const out = {}, T = (j && j.permanentTeeth) || {};
+    Object.keys(T).forEach((t) => { const L = (T[t] || {}).locations || {};
+      Object.keys(L).forEach((l) => Object.keys((L[l] || {}).states || {}).forEach((k) => { if ((L[l].states[k] || {}).isActive) (out[t] = out[t] || []).push(l + ':' + k); })); });
+    return out;
+  }
+  // подсказка сценария: зубы, подходящие по формуле, — пунктиром (только подсветка)
+  function hintTeeth(API) {
+    const sc = scnById(SS.scn); if (!sc || !sc.hint) return [];
+    try { const st = fStates(API); return Object.keys(st).filter((t) => sc.hint.test(st[t])); } catch (e) { return []; }
+  }
   function renderTeeth(API, title) {
-    const M = API.marks();
+    const M = API.marks(), sc = scnById(SS.scn), H = hintTeeth(API);
     const lbl = (t) => (!M ? { txt: t, cls: '' } : M.missing.includes(t) ? { txt: '0', cls: ' miss' } : M.implant.includes(t) ? { txt: 'И', cls: ' impl' } : { txt: t, cls: '' });
-    const btn = (t) => { t = String(t); const L = lbl(t); return '<button class="tb' + L.cls + (SS.teeth.includes(t) ? ' on' : '') + '" data-stooth="' + t + '" title="' + t + '">' + L.txt + '</button>'; };
+    const btn = (t) => { t = String(t); const L = lbl(t); return '<button class="tb' + L.cls + (SS.teeth.includes(t) ? ' on' : H.includes(t) ? ' dv' : '') + '" data-stooth="' + t + '" title="' + t + '">' + L.txt + '</button>'; };
     const r = (a, z) => Array.from({ length: z }, (_, i) => a + i), half = (arr) => '<div class="half">' + arr.map(btn).join('') + '</div>';
     const row = (L, R) => '<div class="jaw">' + half(L) + '<div class="mid"></div>' + half(R) + '</div>';
     const sel = SS.teeth.slice().sort().map(API.fmtTooth).join(', ');
+    const hintH = H.length && sc && sc.hint ? '<div class="ff"><span class="hint">пунктир — ' + esc(sc.hint.text) + '</span></div>' : '';
     return '<div class="formula"><div class="fh"><span class="fl">' + esc(title || 'Зубы') + '</span><span class="fs">' + esc(sel) + '</span>' + (SS.teeth.length ? '<button class="link" data-sclear="1">Сбросить</button>' : badge('bad', 'выберите зубы')) + '</div>' +
       row(r(11, 8).reverse(), r(21, 8)) + '<div class="occl"></div>' + row(r(41, 8).reverse(), r(31, 8)) +
-      (M && (M.missing.length || M.implant.length) ? '<div class="ff"><span class="hint">формула пациента: 0 — нет зуба, И — имплантат</span></div>' : '') + '</div>';
+      (M && (M.missing.length || M.implant.length) ? '<div class="ff"><span class="hint">формула пациента: 0 — нет зуба, И — имплантат</span></div>' : '') + hintH + '</div>';
   }
 
   function render(API) {
@@ -622,5 +637,5 @@
     SS.done = null; SS.fch = null; SS.fText = null; API.rebuild(); API.rerender(); API.toast('Добавленные строки удалены' + fMsg, 'ok');
   }
 
-  globalThis.SQNSMZ_SVCVIEW = { css: CSS, render, bind, _test: { lines: () => lines(), state: () => SS, reset: () => { SS = null; }, CARD, formulaChanges, formulaPlan, changesText } };
+  globalThis.SQNSMZ_SVCVIEW = { css: CSS, render, bind, _test: { lines: () => lines(), state: () => SS, reset: () => { SS = null; }, CARD, formulaChanges, formulaPlan, changesText, hintTeeth: (API) => hintTeeth(API) } };
 })();

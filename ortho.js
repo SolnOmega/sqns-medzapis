@@ -178,6 +178,28 @@
     Object.keys(M.links).forEach((k) => { const [a, b] = k.split('-'); if (!M.links[k] || !hasFix(peek(M, a)) || !hasFix(peek(M, b))) delete M.links[k]; });
   }
   const implTeeth = (M, J) => SEQ[J].filter((t) => peek(M, t).root === 'impl').sort();
+  // Полная потеря на имплантатах: имплантаты не рисуются кистью — врач задаёт количество (2–8), схема расставляет сама:
+  // 2 — четвёрки, 3–4 — + двойки, 5–6 — + шестёрки, 7–8 — + семёрки. Если в формуле SQNS ровно столько имплантатов — берём их места.
+  const POS = { U: ['14', '24', '12', '22', '16', '26', '17', '27'], L: ['44', '34', '42', '32', '46', '36', '47', '37'] };
+  const lossImpl = (p, J) => lossOn(p, J) && (p['lk' + J] === 'rem' || p['lk' + J] === 'fix');
+  const formImpl = (M, J) => (M ? SEQ[J].filter((t) => { const x = peek(M, t); return x.known && x.root === 'impl' && !x.uImpl; }) : []);
+  const lossN = (p, J) => Math.max(2, Math.min(8, +p['ln' + J] || 4));
+  function implPos(p, J) {
+    if (!lossImpl(p, J)) return [];
+    const n = lossN(p, J), fi = formImpl(p.omap, J);
+    return (fi.length === n ? fi : POS[J].slice(0, n)).slice().sort();
+  }
+  // что стоит на имплантате при полной потере: tb / mu / bar / ball (смешанные Ti + мульты — мульты на последних по порядку местах)
+  function lossSup(p, J, t) {
+    const k = p['lk' + J];
+    if (k === 'rem') return p['lr' + J] === 'ball' ? 'ball' : p['lr' + J] === 'bar' ? 'bar' : null;
+    const s2 = p['lsup' + J];
+    if (s2 !== 'mix') return s2 || null;
+    const it = implPos(p, J), order = POS[J].filter((x) => it.includes(x)).concat(it.filter((x) => !POS[J].includes(x)));
+    const mu = muN(p, J);
+    return order.indexOf(t) >= order.length - mu ? 'mu' : 'tb';
+  }
+  const muN = (p, J) => Math.max(1, Math.min(lossN(p, J) - 1, +p['lmuN' + J] || 1));
   const remTeeth = (M, J) => SEQ[J].filter((t) => peek(M, t).rem).sort();
   // мост на имплантатах: хотя бы одна опора — имплантат
   const implBridge = (M, ch) => !!ch && ch.abut.some((a) => peek(M, a).root === 'impl');
@@ -185,7 +207,7 @@
   /* ---------------- кисти: изменение формулы ---------------- */
   function paint(M, t, k, v, p) {
     const x = get(M, t), J = jawOf(t);
-    if (lossOn(p, J) && !['icrown', 'take', 'erase'].includes(k)) return 'На ' + JAW_N[J] + ' включена полная потеря зубов — там работают только «На имплантате» (отметить имплантат), «Снять» и «Ластик»';
+    if (lossOn(p, J) && !['take', 'erase'].includes(k)) return 'На ' + JAW_N[J] + ' включена полная потеря зубов: конструкция и количество имплантатов — в блоке «Полная потеря зубов»; на схеме работают только «Снять» и «Ластик»';
     if (k !== 'bridge') M.anchor = null;
     if (k === 'crown') { x.perm = { k: 'crown', m: v }; delete x.rem; if (x.root === 'none') x.root = 'nat'; if (x.root === 'impl') x.sup = (MAT[v] || {}).g === 'mk' ? 'ind' : (x.sup && x.sup !== 'ind' ? x.sup : 'tb'); }
     if (k === 'pont') {
@@ -346,20 +368,27 @@
     // полная потеря — по челюстям
     ['U', 'L'].forEach((J) => {
       if (!lossOn(p, J)) return;
-      const k = p['lk' + J], it = implTeeth(M, J), q = (id) => L.push({ id, qty: 1, teeth: it.length ? it : undefined });
+      const k = p['lk' + J], it = implPos(p, J), q = (id) => L.push({ id, qty: 1, teeth: it.length ? it : undefined });
       if (k === 'full') {
         L.push({ id: +p['lf' + J] || 157, qty: 1 });
         if (p['larm' + J]) L.push({ id: 159, qty: 1 });
         if (p['lbase' + J]) L.push({ id: 160, qty: 1 });
         if (p['lspoon' + J]) L.push({ id: 155, qty: 1 });
       }
+      if ((k === 'rem' || k === 'fix') && p['lspoonR' + J]) L.push({ id: 155, qty: 1 });
       if (k === 'rem' && p['lr' + J] === 'bar') { q(p['lc' + J] === '2' ? 143 : 142); if (p['lb' + J]) q(p['lb' + J] === '6' ? 126 : 125); }
       if (k === 'rem' && p['lr' + J] === 'ball') { q(144); if (it.length) L.push({ id: +p['ls' + J] || 127, qty: it.length, teeth: it }); }
       if (k === 'fix') {
         const m = p['lm' + J];
         q(m === 'a4' ? 146 : m === 'ac' ? (p['lc' + J] === '2' ? 138 : 137) : (p['lc' + J] === '2' ? 140 : 139));
-        if (p['lbar' + J] && p['lb' + J]) q(p['lb' + J] === '6' ? 126 : 125);
-        if (p['lmu' + J] && it.length) L.push({ id: 124, qty: it.length, teeth: it });
+        const sp = p['lsup' + J], n = it.length;
+        if (sp === 'bar') { if (p['lb' + J]) q(p['lb' + J] === '6' ? 126 : 125); }
+        else if (sp === 'tb') L.push({ id: 118, qty: n, teeth: it });
+        else if (sp === 'mu') L.push({ id: 124, qty: n, teeth: it });
+        else if (sp === 'mix') {
+          const tb = it.filter((t) => lossSup(p, J, t) === 'tb'), mu = it.filter((t) => lossSup(p, J, t) === 'mu');
+          L.push({ id: 118, qty: tb.length, teeth: tb }); L.push({ id: 124, qty: mu.length, teeth: mu });
+        }
       }
     });
     return L;
@@ -371,15 +400,15 @@
     if (p.imp && !(+p.alg + +p.sil + +p.scan)) out.push({ lvl: 'warn', text: 'Оттиски: не указано ни одного оттиска или скана' });
     if (M.anchor) out.push({ lvl: 'warn', text: 'Мост: отметьте вторую крайнюю опору (первая — ' + fmt(M.anchor) + ')' });
     ['U', 'L'].forEach((J) => {
-      const N = JAW_N[J] + ': ', it = implTeeth(M, J);
+      const N = JAW_N[J] + ': ', it = implPos(p, J);
       if (lossOn(p, J)) {
         const k = p['lk' + J];
         if (!k) out.push({ lvl: 'bad', text: N + 'выберите конструкцию при полной потере зубов' });
         if (k === 'rem' && !p['lr' + J]) out.push({ lvl: 'bad', text: N + 'выберите фиксацию — балка или локаторы / шарики' });
-        if ((k === 'rem' && p['lr' + J] === 'bar') || (k === 'fix' && p['lbar' + J])) { if (!p['lb' + J]) out.push({ lvl: 'bad', text: N + 'выберите балку — на 4 или на 6 имплантатах' }); }
-        if ((k === 'rem' || k === 'fix') && !it.length) out.push({ lvl: k === 'rem' && p['lr' + J] === 'ball' ? 'bad' : 'warn', text: N + 'отметьте имплантаты на формуле кистью «Имплантат»' });
-        const lb = p['lb' + J];
-        if (lb && it.length && ((k === 'rem' && p['lr' + J] === 'bar') || (k === 'fix' && p['lbar' + J])) && +lb !== it.length) out.push({ lvl: 'warn', text: N + 'балка на ' + lb + ' имплантатах, а отмечено ' + it.length });
+        const bar = (k === 'rem' && p['lr' + J] === 'bar') || (k === 'fix' && p['lsup' + J] === 'bar'), lb = p['lb' + J];
+        if (k === 'fix' && !p['lsup' + J]) out.push({ lvl: 'bad', text: N + 'выберите супраструктуры' });
+        if (bar && !lb) out.push({ lvl: 'bad', text: N + 'выберите балку — на 4 или на 6 имплантатах' });
+        if (bar && lb && +lb !== it.length) out.push({ lvl: 'warn', text: N + 'балка на ' + lb + ' имплантатах, а имплантатов ' + it.length });
       }
     });
     return out;
@@ -399,12 +428,7 @@
         if (v === 'core') op({ clear: [['crown', 'stump_crown']] });
         if (v === 'fib' || v === 'met') op({ clear: [[/^canal/, /^(post|fiber_post|metal_post)$/], [/^root/, 'post']] });
       });
-      if (lossOn(p, J)) {
-        if (x.root === 'impl') { if (x.uImpl) op({ wipe: true, set: IMPL_SET }); return; }
-        const k = p['lk' + J];
-        if (k) op({ set: [['crown', k === 'fix' ? 'construct_unremovable' : 'construct_removable']] });
-        return;
-      }
+      if (lossOn(p, J)) return;
       if (x.rem) { op({ set: [['crown', 'construct_removable']] }); return; }
       if (x.root === 'impl' && (pm && pm.k === 'crown' || x.temp || x.uImpl)) op({ wipe: !!x.uImpl, set: IMPL_SET });
       if (x.core) op({ set: [['crown', 'stump_crown']] });
@@ -412,6 +436,15 @@
       else if (pm && pm.k === 'pont') op({ clear: [['crown', 'artificial_crown'], ['crown', 'temporary_crown']], set: [['crown', 'bridge_intermediate']] });
       else if (pm && (pm.k === 'ven' || pm.k === 'inl')) op({ clear: [CAR], set: [['crown', 'indirect_restoration']] });
       else if (!pm && x.temp && x.root !== 'impl') op({ clear: [['default', 'removed'], ['crown', 'removed']], set: [['crown', 'temporary_crown']] });
+    });
+    // полная потеря: имплантаты на своих местах, остальные зубы челюсти — конструкция съёмная / несъёмная
+    ['U', 'L'].forEach((J) => {
+      if (!lossOn(p, J) || !p['lk' + J]) return;
+      const it = implPos(p, J), st = p['lk' + J] === 'fix' ? 'construct_unremovable' : 'construct_removable';
+      SEQ[J].forEach((t) => {
+        if (it.includes(t)) { const x = peek(M, t); ops.push({ t, wipe: !(x.known && x.root === 'impl'), set: IMPL_SET }); }
+        else ops.push({ t, set: [['crown', st]] });
+      });
     });
     return ops;
   }
@@ -422,20 +455,20 @@
     metal: ['#6b7280', '#374151'], comp: ['#d49558', '#97602c'], ex: ['#e5e7eb', '#9ca3af'], impl: ['#cbd5e1', '#64748b'],
     base: ['#fbcfe0', '#e879a6'], gum: '#f4a7b9', temp: '#475569', red: '#dc2626', ac: ['#ffffff', '#94a3b8'],
   };
-  const SUP_C = { tb: '#94a3b8', mu: '#475569', zab: COL.zr[0] };
+  const SUP_C = { tb: '#94a3b8', mu: '#475569', zab: COL.zr[0], bar: '#64748b', ind: '#94a3b8' };
   const rect = (x, y, w, h, rx, c, extra) => '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="' + rx + '" fill="' + c[0] + '" stroke="' + c[1] + '" stroke-width="1.2"' + (extra || '') + '/>';
   const metalLayer = (y, h) => '<rect x="6.5" y="' + y + '" width="17" height="' + h + '" rx="5" fill="none" stroke="#475569" stroke-width="1.6"/>';
   // зуб в локальных координатах: коронка сверху (y 6–40), корень снизу (40–88); верхняя челюсть отражается
   function toothSvg(x, p, J, t) {
     let h = '';
     const loss = lossOn(p, J), lk2 = p['lk' + J];
-    const root = x.root || 'nat';
+    const root = loss ? (implPos(p, J).includes(t) ? 'impl' : 'none') : (x.root || 'nat');
     if ((loss && lk2 !== 'fix') || (!loss && x.rem)) h += '<rect x="0" y="30" width="30" height="14" fill="' + COL.base[0] + '"/><line x1="0" y1="30" x2="30" y2="30" stroke="' + COL.base[1] + '"/><line x1="0" y1="44" x2="30" y2="44" stroke="' + COL.base[1] + '"/>';
     if (root === 'nat' && !loss) h += '<path d="M9 40 L12 83 Q15 90 18 83 L21 40 Z" fill="#fff" stroke="#cbd5e1" stroke-width="1.2"/>';
     if (root === 'impl') {
       h += rect(11, 50, 8, 36, 3, COL.impl);
       for (let y = 55; y < 84; y += 6) h += '<line x1="11" y1="' + y + '" x2="19" y2="' + (y + 2.5) + '" stroke="#64748b" stroke-width="1"/>';
-      const sup = loss ? (lk2 === 'rem' && p['lr' + J] === 'ball' ? 'ball' : lk2 === 'fix' && p['lmu' + J] ? 'mu' : null) : (x.perm && x.perm.k === 'crown' ? x.sup : null);
+      const sup = loss ? lossSup(p, J, t) : (x.perm && x.perm.k === 'crown' ? x.sup : null);
       if (sup === 'ball') h += '<circle cx="15" cy="44" r="5" fill="#94a3b8" stroke="#475569" stroke-width="1"/>';
       else if (sup) h += '<rect x="11.5" y="38" width="7" height="12" rx="1.5" fill="' + (SUP_C[sup] || '#94a3b8') + '" stroke="#475569" stroke-width="1"/>';
     }
@@ -496,6 +529,11 @@
       });
     });
     // номера зубов — между челюстями
+    ['U', 'L'].forEach((J) => {
+      const it = implPos(p, J); if (it.length < 2 || !it.every((t) => lossSup(p, J, t) === 'bar')) return;
+      const xs = it.map((t) => cx(J, t)), y = J === 'U' ? UY - 46 : LY + 42;
+      h += '<rect x="' + (Math.min(...xs) + 8) + '" y="' + y + '" width="' + (Math.max(...xs) - Math.min(...xs) + 14) + '" height="5" rx="2" fill="#64748b" stroke="#334155" stroke-width="1"/>';
+    });
     let nums = '';
     ['U', 'L'].forEach((J) => SEQ[J].forEach((t) => { nums += '<text x="' + (cx(J, t) + 15) + '" y="' + (J === 'U' ? 105 : 115) + '" class="otn" text-anchor="middle">' + t + '</text>'; }));
     const W = PAD * 2 + CELL * 16 + MID;
@@ -543,8 +581,9 @@
     });
     ['U', 'L'].forEach((J) => {
       if (lossOn(p, J)) {
-        const it = implTeeth(M, J);
-        h += '<div class="osb"><b>' + JAW_N[J] + ': полная потеря зубов</b>' + (it.length ? '<br><span>имплантаты ' + fmtL(it) + '</span>' : '') + '</div>';
+        const it = implPos(p, J), k = p['lk' + J], sp = p['lsup' + J];
+        const supT = k === 'fix' ? ({ tb: 'Ti-основания', mu: 'мультиюниты', bar: 'балка', mix: 'Ti-основания ' + (it.length - muN(p, J)) + ' + мультиюниты ' + muN(p, J) })[sp] : k === 'rem' ? ({ bar: 'балка', ball: 'локаторы / шарики' })[p['lr' + J]] : '';
+        h += '<div class="osb"><b>' + JAW_N[J] + ': полная потеря зубов</b>' + (it.length ? '<br><span>имплантатов ' + it.length + ': ' + fmtL(it) + (supT ? ' · ' + supT : '') + '</span>' : '') + '</div>';
       } else if (remTeeth(M, J).length) h += '<div class="osb"><b>' + JAW_N[J] + ': частичный съёмный протез</b><br><span>замещает ' + fmtL(remTeeth(M, J)) + '</span></div>';
     });
     const rows = Object.keys(M.t).sort().map((t) => {
@@ -651,7 +690,7 @@
   const LOSS = (J) => {
     const G = 'loss' + J, k = (p) => p['lk' + J];
     const isFull = (p) => k(p) === 'full', isRem = (p) => k(p) === 'rem', isFix = (p) => k(p) === 'fix';
-    const bar = (p) => (isRem(p) && p['lr' + J] === 'bar') || (isFix(p) && p['lbar' + J]);
+    const bar = (p) => (isRem(p) && p['lr' + J] === 'bar') || (isFix(p) && p['lsup' + J] === 'bar');
     const g = { grp: G };
     return [
       { key: G, label: 'Полная потеря зубов — ' + JAW_N[J], type: 'group', default: false, auto: (teeth, p) => autoLoss(p, J), summary: (p) => ({ full: 'полный съёмный', rem: 'съёмный на имплантатах', fix: 'несъёмный на имплантатах' })[k(p)] || '' },
@@ -659,14 +698,17 @@
       seg('lf' + J, 'Протез', [o('157', 'Пластиночный'), o('158', 'Термопласт'), o('156', 'Иммедиат')], '157', isFull, g),
       Object.assign({ key: 'larm' + J, label: 'Армирование', type: 'toggle', default: false, show: isFull }, g),
       Object.assign({ key: 'lbase' + J, label: 'Литой металлический базис', type: 'toggle', default: false, show: isFull }, g),
-      Object.assign({ key: 'lspoon' + J, label: 'Индивидуальная ложка', type: 'toggle', default: false, show: isFull }, g),
+      Object.assign({ key: 'lspoon' + J, label: 'Индивидуальная ложка', type: 'toggle', default: true, show: isFull }, g),
+      Object.assign({ key: 'ln' + J, label: 'Укажите количество имплантатов', type: 'counter', min: 2, max: 8, default: 4, show: (p) => isRem(p) || isFix(p),
+        auto: (teeth, p) => { const n = formImpl(p.omap, J).length; return n >= 2 && n <= 8 ? n : 4; } }, g),
+      Object.assign({ key: 'lspoonR' + J, label: 'Индивидуальная ложка', type: 'toggle', default: false, show: (p) => isRem(p) || isFix(p) }, g),
       seg('lr' + J, 'Фиксация', [o('bar', 'Балка'), o('ball', 'Локаторы / шарики')], null, isRem, g),
       seg('lm' + J, 'Материал', [o('zr', 'Цирконий'), o('ac', 'Акрил'), o('a4', 'All-on-4')], 'zr', isFix, g),
       seg('lc' + J, 'Категория', [o('1', '1 категория'), o('2', '2 категория')], '1', (p) => (isRem(p) && p['lr' + J] === 'bar') || (isFix(p) && p['lm' + J] !== 'a4'), g),
       seg('ls' + J, 'На имплантаты', [o('127', 'Шариковый абатмент'), o('128', 'O-Ring')], '127', (p) => isRem(p) && p['lr' + J] === 'ball', Object.assign({ sub: true }, g)),
-      Object.assign({ key: 'lbar' + J, label: 'Балка', type: 'toggle', default: false, show: isFix }, g),
-      seg('lb' + J, 'Балка', [o('4', 'На 4 имплантатах'), o('6', 'На 6 имплантатах')], null, bar, Object.assign({ sub: true, auto: (teeth, p) => { const n = p.omap ? implTeeth(p.omap, J).length : 0; return n >= 6 ? '6' : n >= 4 ? '4' : null; } }, g)),
-      Object.assign({ key: 'lmu' + J, label: 'Мультиюниты (по имплантатам)', type: 'toggle', default: false, show: isFix }, g),
+      seg('lsup' + J, 'Супраструктуры', [o('tb', 'Ti-основания'), o('mu', 'Мультиюниты'), o('mix', 'Ti + мультиюниты'), o('bar', 'Балка')], 'tb', isFix, Object.assign({ wide: true }, g)),
+      cnt('lmuN' + J, 'Из них мультиюнитов', 'шт.', 2, Object.assign({ min: 1, max: 7, sub: true, show: (p) => isFix(p) && p['lsup' + J] === 'mix' }, g)),
+      seg('lb' + J, 'Балка', [o('4', 'На 4 имплантатах'), o('6', 'На 6 имплантатах')], null, bar, Object.assign({ sub: true, auto: (teeth, p) => (lossN(p, J) >= 6 ? '6' : '4') }, g)),
     ];
   };
   const PART = (J) => {

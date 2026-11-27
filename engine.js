@@ -31,7 +31,7 @@
   const LAT = { 'А': 'A', 'В': 'B', 'С': 'C', 'Е': 'E', 'К': 'K', 'М': 'M', 'Н': 'H', 'О': 'O', 'Р': 'P', 'Т': 'T', 'Х': 'X' };
   const normCode = (name) => ((name || '').trim().split(/\s+/)[0] || '').replace(/[АВСЕКМНОРТХ]/g, (c) => LAT[c]);
 
-  const ENGINE_VERSION = '1.8.3';
+  const ENGINE_VERSION = '1.9.0';
   // В визите может быть несколько дневников: SQNS держит их все на странице (каждый со своим journalIndex).
   // Какой открыт, по странице не понять, поэтому: выбранный в панели → иначе последний пустой → иначе последний.
   let JPICK = null;   // индекс дневника, выбранный врачом в панели
@@ -655,7 +655,7 @@
     host = document.createElement('div'); host.id = 'sqns-medzapis';
     document.body.appendChild(host);
     root = host.attachShadow({ mode: 'open' });
-    root.innerHTML = '<style>' + CSS + ((globalThis.SQNSMZ_SVCVIEW || {}).css || '') + (DOCS() ? DOCS().css : '') + '</style>' +
+    root.innerHTML = '<style>' + CSS + ((globalThis.SQNSMZ_SVCVIEW || {}).css || '') + ((globalThis.SQNSMZ_PLANVIEW || {}).css || '') + (DOCS() ? DOCS().css : '') + '</style>' +
       '<div class="strip" id="strip"></div><div class="dock" id="dock"></div><div class="dpop" id="dpop"></div>' +
       '<div class="wrap" id="wrap"><div class="shade" id="shade"></div><div class="panel" id="panel"></div></div>' +
       '<div class="toast" id="toast"></div><div class="lock" id="lock"></div>';
@@ -666,7 +666,8 @@
   }
   // Открыть панель на нужной вкладке. Без указания: в визите нет услуг → «Услуги», есть → «Медзапись».
   function openPanel(v) { buildInitialState(); undoSnap = undoSnap || null; togglePop(false);
-    if (SVCV()) VIEW = v === 'svc' || v === 'diary' ? v : (S.services.length ? 'diary' : 'svc');
+    if (v === 'plan' && PLANV()) VIEW = 'plan';
+    else if (SVCV()) VIEW = v === 'svc' || v === 'diary' ? v : (S.services.length ? 'diary' : 'svc');
     render(); wrap.classList.add('open'); isOpen = true; }
   function closePanel() { wrap.classList.remove('open'); isOpen = false; }
 
@@ -713,7 +714,14 @@
     if (k === 'doc') { if (!DOCS()) return; if (isOpen) closePanel(); togglePop(); return; }
     togglePop(false);
     if (k === 'svc' || k === 'diary') { if (isOpen && VIEW === k) closePanel(); else openPanel(k); return; }
-    if (k === 'plan') {   // своей вкладки плана пока нет — открываем «Планы лечения» в карточке пациента
+    if (k === 'plan' && DOCS() && !DOCS().allowed('plan')) return;
+    if (k === 'plan' && PLANV()) {
+      const a = document.querySelector('a[href="#treatmentPlan"]');
+      if (!a) { toast('Откройте карточку пациента', 'warn'); return; }
+      if (isOpen && VIEW === 'plan') closePanel(); else { if (a.parentElement && !a.parentElement.classList.contains('ui-state-active')) a.click(); openPanel('plan'); }
+      return;
+    }
+    if (k === 'plan') {   // plan.js не загружен — открываем «Планы лечения» в карточке пациента
       const a = document.querySelector('a[href="#treatmentPlan"]');
       if (a) { closePanel(); a.click(); toast('Открыты «Планы лечения»'); } else toast('Откройте карточку пациента', 'warn');
       return;
@@ -839,7 +847,18 @@
     fmtTooth, marks: () => fMarks(), page: () => PAGE,
     gotoDiary: () => { VIEW = 'diary'; buildInitialState(); render(); },
   };
+  const PLANV = () => globalThis.SQNSMZ_PLANVIEW || null;
   const viewTabs = () => '';   // вкладки заменены боковыми кнопками
+  // вкладка «План» (plan.js): план лечения из сценариев «Услуг»
+  function renderPlan(P) {
+    const prevScroll = P.querySelector('.body') ? P.querySelector('.body').scrollTop : 0;
+    const v = PLANV().render(SVC_API);
+    P.innerHTML = '<div class="hd"><div style="font-size:26px">📋</div><h1>План лечения<small>этапы из шаблонов услуг · v' + ENGINE_VERSION + '</small></h1>' +
+      '<button class="x" id="close">×</button></div><div class="body">' + v.body + '</div><div class="ft">' + v.foot + '</div>';
+    P.querySelector('#close').onclick = closePanel;
+    PLANV().bind(P, SVC_API);
+    const body = P.querySelector('.body'); if (body) body.scrollTop = prevScroll;
+  }
   function bindViews(P) {
     P.querySelectorAll('[data-view]').forEach((el) => el.addEventListener('click', (e) => { VIEW = e.currentTarget.dataset.view; buildInitialState(); render(); }));
   }
@@ -856,6 +875,8 @@
   function render() {
     const P = root.getElementById('panel'); const ctx = getCtx();
     if (!S) buildInitialState();
+    if (VIEW === 'plan' && PLANV()) { renderPlan(P); return; }
+    if (PLANV()) PLANV().leave();   // из «Плана» в «Услуги» / «Медзапись»: вернуть состояние вкладки «Услуги»
     if (VIEW === 'svc' && SVCV()) { renderSvc(P); return; }
     const prevScroll = P.querySelector('.body') ? P.querySelector('.body').scrollTop : 0;
     if (!S) buildInitialState();

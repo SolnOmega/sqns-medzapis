@@ -161,6 +161,8 @@
 
   /* ---------------- состояние вкладки ---------------- */
   let SS = null;
+  // Режим плана лечения (plan.js): формула — виртуальная (пациент + предыдущие этапы), «уже есть» — по строкам этапа, а не визита
+  let CTX = { plan: false, formula: null, stageItems: [] };
   let OPEN_CAT;                  // открытый раздел (Терапия / Хирургия / Ортопедия)
   // значения полей карточки зуба по умолчанию
   function cardDefaults(pr) {
@@ -245,10 +247,10 @@
   function lines() {
     const sc = scnById(SS.scn); if (!sc) return [];
     const L = sc.build(effParams(), SS.teeth.slice().sort());
-    const vf = visitForm(), items = vf ? visitItems(vf) : [];
+    const vf = CTX.plan ? null : visitForm(), items = CTX.plan ? CTX.stageItems : vf ? visitItems(vf) : [];
     L.forEach((l) => {
       const s = SVC[l.id] || {};
-      if (l.skipIfCode && items.some((it) => normCode(it.name).startsWith(l.skipIfCode))) l.skip = 'уже в визите';
+      if (l.skipIfCode && items.some((it) => normCode(it.name).startsWith(l.skipIfCode))) l.skip = CTX.plan ? 'уже в этапе' : 'уже в визите';
       else if (items.some((it) => +it.serviceID === l.id && (it.teeth || []).map(String).sort().join() === (l.teeth || []).map(String).sort().join())) l.dup = true;
       l.code = s.code; l.name = s.name;
     });
@@ -458,17 +460,21 @@
 
   // активные состояния по зубам (живая формула, иначе формула страницы): { '36': ['crown:dentin_caries', …] }
   function fStates(API) {
-    const comp = fComp(), pg = API.page && API.page();
-    const j = (comp && fJson(comp)) || (pg && pg.formula) || null;
+    const j = baseJson(API);
     const out = {}, T = (j && j.permanentTeeth) || {};
     Object.keys(T).forEach((t) => { const L = (T[t] || {}).locations || {};
       Object.keys(L).forEach((l) => Object.keys((L[l] || {}).states || {}).forEach((k) => { if ((L[l].states[k] || {}).isActive) (out[t] = out[t] || []).push(l + ':' + k); })); });
     return out;
   }
   // то же, но null, если формулы нет совсем (для ортопедии: «нет формулы» ≠ «все зубы здоровы»)
+  // формула для подсказок: в плане — виртуальная, иначе живая из SQNS или формула страницы
+  function baseJson(API) {
+    if (CTX.plan) return CTX.formula || null;
+    const comp = fComp(), pg = API && API.page && API.page();
+    return (comp && fJson(comp)) || (pg && pg.formula) || null;
+  }
   function fInfo(API) {
-    const comp = fComp(), pg = API.page && API.page();
-    const j = (comp && fJson(comp)) || (pg && pg.formula) || null;
+    const j = baseJson(API);
     return j && j.permanentTeeth && Object.keys(j.permanentTeeth).length ? fStates(API) : null;
   }
   // подсказка сценария: зубы, подходящие по формуле, — пунктиром (только подсветка)
@@ -493,7 +499,8 @@
   const catOk = (id) => { const D2 = globalThis.SQNSMZ_DOCTORS; return !D2 || D2.allowed(id); };
   function render(API) {
     const okScn = (x) => x && catOk(x.cat || 'all');
-    if (!SS || !okScn(scnById(SS.scn))) {
+    if (CTX.plan) { if (!SS) SS = fresh(null); }
+    else if (!SS || !okScn(scnById(SS.scn))) {
       const last = lsGet(), first = SCENARIOS.find(okScn) || SCENARIOS[0];
       SS = fresh(okScn(scnById(last)) ? last : first.id); OPEN_CAT = undefined;
     }
@@ -504,6 +511,7 @@
     let h = '';
     // выбор сценария: разделы → список шаблонов (подгруппы — sub)
     if (OPEN_CAT === undefined) OPEN_CAT = sc ? sc.cat : null;
+    const PL = CTX.plan;
     h += '<div class="sec"><h2>Что делаем</h2><div class="card"><div class="cats" style="grid-template-columns:repeat(' + Math.max(1, CATS.length) + ',1fr)">' + CATS.map((c) => {
       const has = sc && sc.cat === c.id;
       return '<button class="cat' + (OPEN_CAT === c.id ? ' open' : '') + (has ? ' has' : '') + '" data-scat="' + c.id + '"><span class="ti-ic">' + c.icon + '</span><span class="ti-t">' + esc(c.title) + '</span><span class="cv">' + (OPEN_CAT === c.id ? '▴' : '▾') + '</span></button>';
@@ -517,7 +525,7 @@
         : '<div class="hint">' + esc(oc.empty || 'Сценариев пока нет.') + '</div>') + '</div>';
     }
     h += '</div></div>';
-    if (SS.done) {
+    if (SS.done && !PL) {
       h += '<div class="sec"><div class="card done"><b>Добавлено в визит: ' + SS.done.length + '</b>' +
         (SS.fText && SS.fText.length ? '<div class="fdiff" style="margin-top:8px"><div class="flbl">Внесено в зубную формулу</div>' + fDiffH(SS.fText) + '</div>' : '') +
         '<div class="hint" style="margin:6px 0 0">Проверьте строки услуг' + (SS.fText && SS.fText.length ? ' и формулу' : '') + ' и нажмите «Сохранить» в визите. Дневник теперь можно заполнить по этим услугам.</div></div></div>';
@@ -525,7 +533,7 @@
     if (sc) {
       h += '<div class="sec"><h2>' + esc(sc.icon + ' ' + sc.title) + '</h2><div class="card">' + (sc.needTeeth && !sc.params.some((x) => x.type === 'teethPick') ? renderTeeth(API, sc.teethTitle) : '') + renderList(sc.params, API) + '</div></div>';
       const L = lines(); let total = 0, missingPrice = false;
-      h += '<div class="sec"><h2>Будет добавлено</h2><div class="card cart">' + (L.length ? L.map((l) => {
+      h += '<div class="sec"><h2>' + (PL ? 'В этап' : 'Будет добавлено') + '</h2><div class="card cart">' + (L.length ? L.map((l) => {
         const c = CARD[l.id]; if (!c) { loadCard(l.id).then((x) => { if (x) API.rerender(); }); }
         const price = c ? parseFloat(c.price) || 0 : null; if (!l.skip) { if (price == null) missingPrice = true; else total += price * l.qty; }
         return '<div class="cl' + (l.skip ? ' skip' : '') + '"><div><div class="cd">' + esc(l.code) + '</div>' + esc(l.name) +
@@ -533,7 +541,7 @@
           (l.skip ? ' ' + badge('ok', l.skip) : l.dup ? ' ' + badge('warn', 'такая строка уже есть') : '') + '</div><div class="q">× ' + l.qty + '</div><div class="pr">' + (l.skip ? '—' : price == null ? '…' : rub(price * l.qty)) + '</div></div>';
       }).join('') + '<div class="tot"><span>Итого</span><span>' + (missingPrice ? '…' : rub(total)) + '</span></div>' : '<div class="hint">Пока нечего добавлять</div>') + '</div></div>';
       // зубная формула: переключатель (по умолчанию вкл.) и что изменится
-      if (sc.formula && !SS.done) {
+      if (sc.formula && !SS.done && !PL) {
         const F = formulaPlan(), T = F.ok ? changesText(F.j, F.ch, API) : [];
         h += '<div class="sec"><h2>Зубная формула</h2><div class="card"><div class="row" style="grid-template-columns:1fr auto;margin:0"><label>Внести изменения в зубную формулу</label><div><button class="tg ' + (SS.fon ? 'on' : '') + '" data-sfon="1"></button></div></div>' +
           (!SS.fon ? '' : !F.ok ? '<div style="margin-top:6px">' + badge('warn', F.why || 'формула недоступна') + '</div>'
@@ -541,11 +549,12 @@
           '</div></div>';
       }
       const iss = (sc.check ? sc.check(effParams(), SS.teeth, { touched: SS.touched }) : []);
-      if (!visitForm()) iss.unshift({ lvl: 'bad', text: 'Визит не открыт: откройте визит пациента на вкладке «История болезни»' });
+      if (!PL && !visitForm()) iss.unshift({ lvl: 'bad', text: 'Визит не открыт: откройте визит пациента на вкладке «История болезни»' });
       if (SS.error) iss.unshift({ lvl: 'bad', text: SS.error });
       if (iss.length) h += '<div class="sec"><h2>Проверка</h2><div class="iss">' + iss.map((i) => '<div class="' + i.lvl + '">' + (i.lvl === 'bad' ? '⛔' : '⚠️') + ' ' + esc(i.text) + '</div>').join('') + '</div></div>';
       SS._bad = iss.some((i) => i.lvl === 'bad' && i.text !== SS.error) || !L.some((l) => !l.skip);
     }
+    if (PL) return { body: h, foot: '', bad: !sc || !!SS._bad };
     // после добавления следующий шаг — дневник: он становится главной кнопкой
     const foot = SS.done && !SS.busy
       ? '<button class="btn sec2" id="svcundo">↶ Отменить</button><button class="btn sec2" id="svcadd"' + (SS._bad ? ' disabled' : '') + '>＋ Добавить ещё</button><button class="btn pri" id="svcdiary">📝 Заполнить дневник →</button>'
@@ -613,7 +622,7 @@
         SS.params[k] = pr.default !== undefined ? clone(pr.default) : pr.type === 'toggle' ? false : pr.type === 'counter' ? (pr.min || 0) : pr.type === 'stock' ? {} : null; }); },
       touch: (keys) => keys.forEach((k) => { SS.touched[k] = 1; }),
     };
-    scnById(SS.scn).params.forEach((pr) => { const TY = (D.TYPES || {})[pr.type]; if (TY && TY.bind) TY.bind(P, pr, SS.params, re, tyCtx); });
+    (scnById(SS.scn) || { params: [] }).params.forEach((pr) => { const TY = (D.TYPES || {})[pr.type]; if (TY && TY.bind) TY.bind(P, pr, SS.params, re, tyCtx); });
     const add = P.querySelector('#svcadd'); if (add) add.onclick = () => doAdd(API);
     const undo = P.querySelector('#svcundo'); if (undo) undo.onclick = () => doUndo(API);
     const dia = P.querySelector('#svcdiary'); if (dia) dia.onclick = () => API.gotoDiary();
@@ -663,5 +672,41 @@
     SS.done = null; SS.fch = null; SS.fText = null; API.rebuild(); API.rerender(); API.toast('Добавленные строки удалены' + fMsg, 'ok');
   }
 
-  globalThis.SQNSMZ_SVCVIEW = { css: CSS, render, bind, _test: { lines: () => lines(), state: () => SS, reset: () => { SS = null; }, CARD, formulaChanges, formulaPlan, changesText, hintTeeth: (API) => hintTeeth(API) } };
+  /* ---------------- для вкладки «План» (plan.js) ---------------- */
+  // Состояние блока сохраняется в рецепте плана (комментарий плана SQNS) — только данные, без служебных ссылок
+  const KEEP = ['scn', 'teeth', 'params', 'touched', 'ctouched', 'more', 'tsOpen', 'fon'];
+  function stateJSON(st) { const o = {}; KEEP.forEach((k) => { if (st[k] !== undefined) o[k] = clone(st[k]); }); return o; }
+  function stateFrom(o) {
+    const st = fresh(o && o.scn && scnById(o.scn) ? o.scn : null);
+    if (o) KEEP.slice(1).forEach((k) => { if (o[k] !== undefined) st[k] = clone(o[k]); });
+    autoParams(st); return st;
+  }
+  function withState(st, fn) { const prev = SS; SS = st; try { return fn(); } finally { SS = prev; } }
+  // строки, сумма и проблемы текущего (или переданного) состояния; цены догружаются, onPrice — перерисовать
+  function cartOf(onPrice) {
+    const sc = scnById(SS.scn); if (!sc) return { lines: [], total: 0, missing: false, bad: true, issues: [] };
+    const L = lines().filter((l) => !l.skip); let total = 0, missing = false;
+    L.forEach((l) => { const c = CARD[l.id]; if (!c) { missing = true; loadCard(l.id).then((x) => { if (x && onPrice) onPrice(); }); } else total += (parseFloat(c.price) || 0) * l.qty; });
+    const iss = sc.check ? sc.check(effParams(), SS.teeth, { touched: SS.touched }) : [];
+    return { lines: L, total, missing, issues: iss, bad: iss.some((i) => i.lvl === 'bad') || !L.length };
+  }
+  function formulaOps() { const sc = scnById(SS.scn); if (!sc || !sc.formula) return []; try { return sc.formula(effParams(), SS.teeth.slice().sort()) || []; } catch (e) { return []; } }
+  // применить изменения к копии формулы (виртуальная формула плана)
+  function applyToJson(j, ops) {
+    formulaChanges(j, ops).forEach((c) => { const T = toothOf(j, c.t); const L = T && T.locations && T.locations[c.loc]; if (L && L.states && L.states[c.st]) L.states[c.st].isActive = c.on; });
+    return j;
+  }
+  // вход в план: состояние вкладки «Услуги» откладывается и возвращается при выходе (SS и раздел общие)
+  let VISIT = null;
+  const PLAN = {
+    setCtx: (c) => { if (!CTX.plan) VISIT = { SS, OPEN_CAT }; CTX = Object.assign({ formula: null, stageItems: [] }, c || {}, { plan: true }); },
+    leave: () => { if (!CTX.plan) return; SS = VISIT ? VISIT.SS : null; OPEN_CAT = VISIT ? VISIT.OPEN_CAT : undefined; VISIT = null; CTX = { plan: false, formula: null, stageItems: [] }; },
+    inPlan: () => CTX.plan,
+    getState: () => SS, setState: (st) => { SS = st; }, fresh: (id) => fresh(id), stateJSON, stateFrom, withState,
+    cartOf, formulaOps, applyToJson, liveFormula: (API) => { const comp = fComp(); return (comp && fJson(comp)) || ((API && API.page && API.page()) || {}).formula || null; },
+    scnById, SCENARIOS, CATS: CATS_ALL, SVC, CARD, loadCard, normCode, catOk,
+    setOpenCat: (v) => { OPEN_CAT = v; },
+  };
+
+  globalThis.SQNSMZ_SVCVIEW = { css: CSS, render, bind, plan: PLAN, _test: { lines: () => lines(), state: () => SS, reset: () => { SS = null; }, CARD, formulaChanges, formulaPlan, changesText, hintTeeth: (API) => hintTeeth(API) } };
 })();

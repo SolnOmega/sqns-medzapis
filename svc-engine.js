@@ -515,14 +515,14 @@
     const PL = CTX.plan;
     h += '<div class="sec"><h2>Что делаем</h2><div class="card"><div class="cats" style="grid-template-columns:repeat(' + Math.max(1, CATS.length) + ',1fr)">' + CATS.map((c) => {
       const has = sc && sc.cat === c.id;
-      return '<button class="cat' + (OPEN_CAT === c.id ? ' open' : '') + (has ? ' has' : '') + '" data-scat="' + c.id + '"><span class="ti-ic">' + c.icon + '</span><span class="ti-t">' + esc(c.title) + '</span><span class="cv">' + (OPEN_CAT === c.id ? '▴' : '▾') + '</span></button>';
+      return '<button class="cat' + (OPEN_CAT === c.id ? ' open' : '') + (has ? ' has' : '') + '" data-scat="' + c.id + '"><span class="ti-ic">' + c.icon + '</span><span class="ti-t">' + esc(c.title) + '</span>' + (SCENARIOS.filter((x) => (x.cat || 'all') === c.id).length === 1 ? '' : '<span class="cv">' + (OPEN_CAT === c.id ? '▴' : '▾') + '</span>') + '</button>';
     }).join('') + '</div>';
     const oc = CATS.find((c) => c.id === OPEN_CAT);
     if (oc) {
       const list = SCENARIOS.filter((x) => (x.cat || 'all') === oc.id);
       const tile = (x) => '<button class="tile' + (x.id === SS.scn ? ' on' : '') + '" data-sscn="' + x.id + '"><span class="ti-ic">' + x.icon + '</span><span class="ti-t">' + esc(x.title) + '</span></button>';
       const subs = [...new Set(list.map((x) => x.sub || ''))];
-      h += '<div class="catl">' + (list.length ? subs.map((sb) => (sb ? '<div class="csub">' + esc(sb) + '</div>' : '') + '<div class="tiles">' + list.filter((x) => (x.sub || '') === sb).map(tile).join('') + '</div>').join('')
+      if (list.length !== 1) h += '<div class="catl">' + (list.length ? subs.map((sb) => (sb ? '<div class="csub">' + esc(sb) + '</div>' : '') + '<div class="tiles">' + list.filter((x) => (x.sub || '') === sb).map(tile).join('') + '</div>').join('')
         : '<div class="hint">' + esc(oc.empty || 'Сценариев пока нет.') + '</div>') + '</div>';
     }
     h += '</div></div>';
@@ -570,11 +570,12 @@
     const prOf = (k) => scnById(SS.scn).params.find((x) => x.key === k);
     // карточка зуба: "ключ|зуб|поле" → { c (значения зуба), f (описание поля) }
     const cell = (s) => { const [k, t, fk] = s.split('|'); const pr = prOf(k); const c = SS.params[k][t]; return { c, f: pr.fields.find((x) => x.key === fk), t, fk }; };
-    on('[data-sscn]', 'click', (e) => {   // зубы и вручную заданные каналы переходят в новый шаблон
+    const pickScn = (id) => {   // зубы и вручную заданные каналы переходят в новый шаблон
       const keep = SS.teeth.slice(), ck = canalsKey(scnById(SS.scn)), canals = ck ? Object.assign({}, SS.params[ck]) : null, ct = Object.assign({}, SS.ctouched);
-      SS = fresh(e.currentTarget.dataset.sscn); SS.teeth = keep; const nk = canalsKey(scnById(SS.scn));
+      SS = fresh(id); SS.teeth = keep; const nk = canalsKey(scnById(SS.scn));
       if (nk && canals) { SS.params[nk] = canals; SS.ctouched = ct; }
-      autoParams(SS); lsSet(SS.scn); API.rerender(); });
+      autoParams(SS); lsSet(SS.scn); API.rerender(); };
+    on('[data-sscn]', 'click', (e) => pickScn(e.currentTarget.dataset.sscn));
     on('[data-stooth]', 'click', (e) => { const t = e.currentTarget.dataset.stooth; SS.teeth = SS.teeth.includes(t) ? SS.teeth.filter((x) => x !== t) : SS.teeth.concat(t); SS.done = null; re(); });
     on('[data-sts]', 'click', (e) => { const k = e.currentTarget.dataset.sts, t = e.currentTarget.dataset.t, a = (SS.params[k] || []).slice();
       SS.params[k] = a.includes(t) ? a.filter((x) => x !== t) : a.concat(t); touch(k); SS.tsOpen[k] = true; re(); });
@@ -594,7 +595,11 @@
     on('[data-ctg]', 'click', (e) => { const x = cell(e.currentTarget.dataset.ctg); x.c[x.fk] = !x.c[x.fk]; re(); });
     on('[data-copt]', 'click', (e) => { const x = cell(e.currentTarget.dataset.copt); x.c[x.fk] = x.c[x.fk] ? null : (x.f.onDefault || x.f.options[0].v); re(); });
     on('[data-coptv]', 'click', (e) => { const x = cell(e.currentTarget.dataset.coptv); x.c[x.fk] = e.currentTarget.dataset.v; re(); });
-    on('[data-scat]', 'click', (e) => { const c = e.currentTarget.dataset.scat; OPEN_CAT = OPEN_CAT === c ? null : c; API.rerender(); });
+    on('[data-scat]', 'click', (e) => {
+      const c = e.currentTarget.dataset.scat, list = SCENARIOS.filter((x) => (x.cat || 'all') === c);
+      // в разделе один шаблон (ортопедия) — клик по разделу сразу открывает его
+      if (list.length === 1) { OPEN_CAT = c; if (SS.scn !== list[0].id) pickScn(list[0].id); else API.rerender(); return; }
+      OPEN_CAT = OPEN_CAT === c ? null : c; API.rerender(); });
     on('[data-cseg]', 'click', (e) => { const x = cell(e.currentTarget.dataset.cseg); x.c[x.fk] = e.currentTarget.dataset.v; re(); });
     on('[data-ccount]', 'click', (e) => { const x = cell(e.currentTarget.dataset.ccount), N = canalsOf(SS, x.t);
       x.c[x.fk] = Math.max(0, Math.min(N, (+x.c[x.fk] || 0) + +e.currentTarget.dataset.d)); x.c._t[x.fk] = 1; re(); });

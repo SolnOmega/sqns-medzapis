@@ -123,7 +123,7 @@
   let PS = null, ACT = null;   // ACT — редактируемый блок { si, bi }
   let SET = null;              // какое состояние мы отдали движку в последний раз: { st, si, bi }
   function give(si, bi, st) { E.setState(st); SET = { st, si, bi }; }
-  const blank = () => ({ view: 'list', client: null, planId: null, newKey: null, title: '', titleTouched: false, userComment: '', applied: false, stages: [], base: null, busy: false, error: '', confirm: null });
+  const blank = () => ({ peek: null, view: 'list', client: null, planId: null, newKey: null, title: '', titleTouched: false, userComment: '', applied: false, stages: [], base: null, busy: false, error: '', confirm: null });
   const VERB = { caries: 'лечение кариеса', hygiene: 'профессиональная гигиена', pulpitis: 'лечение пульпита', periodontitis: 'лечение периодонтита', recalc: 'смена кальция',
     obturation: 'пломбирование каналов', extraction: 'удаление', implant: 'установка имплантатов', fdm: 'установка формирователей десны', sinus: 'синус-лифтинг', nkr: 'костная пластика', ortho: 'протезирование' };
   const CATN = { ther: 'Терапевтическая подготовка', surg: 'Хирургическая подготовка', ortho: 'Ортопедический этап' };
@@ -349,6 +349,8 @@
   .pl-ib:hover:not(:disabled){border-color:#818cf8;color:#3730a3} .pl-ib:disabled{opacity:.35;cursor:default} .pl-ib.del:hover{border-color:#fca5a5;color:#b91c1c}
   .pl-ib.warn{border-color:#fca5a5;color:#b91c1c;background:#fef2f2}
   .pl-sb{padding:2px 12px 12px;border-top:1px dashed #e2e8f0}
+  .pl-stage:not(.open) .pl-sh{cursor:pointer} .pl-stage:not(.open) .pl-sh:hover{background:#fafbff} .pl-stage.peek{border-color:#a5b4fc}
+  .pl-ro b{color:#0e7490}
   .pl-in{display:grid;grid-template-columns:110px 1fr;gap:8px;align-items:center;margin:8px 0} .pl-in label{font-size:12px;color:#475569;font-weight:600}
   .pl-chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px} .pl-chips button{border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:3px 8px;font-size:11.5px;cursor:pointer;color:#334155}
   .pl-chips button.on{border-color:#818cf8;background:#eef2ff;color:#3730a3;font-weight:700}
@@ -407,13 +409,14 @@
       if (s.open) { h += renderOpenStage(API, s, si, c, nShown); return; }
       const k = ch.indexOf(s), canMove = !B && openSi < 0 && !s.loose && s.sq;
       const conf = PS.confirm === si;
-      h += '<div class="pl-stage"><div class="pl-sh"><div class="pl-pt"><div class="pl-pn">' + esc(nShown) + (s.after && k > 0 ? ' · ≈ через ' + esc(s.after) : '') + '</div><b>' + esc(stageName(s, c)) + '</b>' +
+      const peek = PS.peek === si;
+      h += '<div class="pl-stage' + (peek ? ' peek' : '') + '"><div class="pl-sh" data-plp="' + si + '" title="' + (peek ? 'Свернуть' : 'Показать услуги этапа') + '"><div class="pl-pt"><div class="pl-pn">' + esc(nShown) + (s.after && k > 0 ? ' · ≈ через ' + esc(s.after) : '') + '</div><b>' + esc(stageName(s, c)) + '</b>' +
         (s.ro ? '<div class="pl-pm">' + (s.changed ? badge('warn', 'изменён в SQNS вручную — только просмотр') : s.loose ? '' : badge('warn', 'только просмотр')) + '</div>' : c.bad ? '<div class="pl-pm">' + badge('bad', 'есть незаполненные поля') + '</div>' : '') +
         '</div><div><div class="pl-ps">' + (c && c.missing ? '…' : rub(sum)) + '</div><div class="pl-act" style="margin-top:6px">' +
         (s.ro || s.loose ? '' : '<button class="pl-ib" data-pls="' + si + '" title="Изменить"' + (B || openSi >= 0 ? ' disabled' : '') + '>✎</button>') +
         (!s.loose ? '<button class="pl-ib" data-plu="' + si + '" title="Выше"' + (canMove && k > 0 && ch[k - 1].sq ? '' : ' disabled') + '>↑</button><button class="pl-ib" data-pld="' + si + '" title="Ниже"' + (canMove && k < ch.length - 1 && ch[k + 1].sq ? '' : ' disabled') + '>↓</button>' : '') +
         (s.loose ? '' : '<button class="pl-ib del' + (conf ? ' warn' : '') + '" data-plx="' + si + '" title="Удалить этап"' + (B || openSi >= 0 ? ' disabled' : '') + '>' + (conf ? 'Удалить?' : '🗑') + '</button>') +
-        '</div></div></div>' + (s.ro ? '<div class="pl-sb pl-ro">' + s.items.map((x) => '<div><span>' + esc(x.name) + (x.teeth.length ? ' ' + x.teeth.map(FMT).join(', ') : '') + (x.qty !== 1 ? ' × ' + x.qty : '') + (x.provided ? ' ' + badge('ok', 'оказано') : '') + '</span><span>' + rub(x.sum) + '</span></div>').join('') + '</div>' : '') + '</div>';
+        '</div></div></div>' + (peek ? '<div class="pl-sb pl-ro">' + peekRows(s, c).map((x) => '<div><span>' + esc(x.name) + (x.teeth.length ? ' <b>' + x.teeth.map(FMT).join(', ') + '</b>' : '') + (x.qty !== 1 ? ' × ' + x.qty : '') + (x.provided ? ' ' + badge('ok', 'оказано') : '') + '</span><span>' + (x.sum == null ? '…' : rub(x.sum)) + '</span></div>').join('') + '</div>' : '') + '</div>';
     });
     if (openSi < 0) h += '<button class="pl-add" data-pl="stage"' + (B ? ' disabled' : '') + '>＋ Добавить этап</button>';
     if (PS.stages.length) h += '<div class="pl-tot"><span>Итого по плану</span><span>' + (missing ? '…' : rub(total)) + '</span></div>';
@@ -434,6 +437,12 @@
       E.setCtx({ formula: formulaAt(ACT.si, ACT.bi), stageItems: items }); give(ACT.si, ACT.bi, st);
     }
     return { body: h, foot };
+  }
+  // строки этапа для просмотра: «только просмотр» — из SQNS, остальные — из блоков (цены — из SQNS)
+  function peekRows(s, c) {
+    if (s.ro) return s.items;
+    return ((c && c.lines) || []).map((l) => { const sv = E.SVC[l.id] || {}, cd = E.CARD[l.id];
+      return { name: ((sv.code || '') + ' ' + (sv.name || '')).trim(), teeth: (l.teeth || []).map(String).sort(), qty: l.qty, sum: cd ? (parseFloat(cd.price) || 0) * l.qty : null }; });
   }
   function renderOpenStage(API, s, si, c, nShown) {
     const k = chain().indexOf(s), B = PS.busy;
@@ -474,11 +483,14 @@
     on('[data-pls]', 'click', (e) => {   // раскрыть сохранённый этап
       const si = +e.currentTarget.dataset.pls, s = PS.stages[si];
       s.snap = JSON.stringify({ name: s.name, nameTouched: s.nameTouched, after: s.after, blocks: s.blocks.map(E.stateJSON) });
-      s.open = true; PS.confirm = null; activate(si, 0); rr();
+      s.open = true; PS.confirm = null; PS.peek = null; activate(si, 0); rr();
     });
+    on('[data-plp]', 'click', (e) => { if (e.target.closest('button')) return; const si = +e.currentTarget.dataset.plp; PS.peek = PS.peek === si ? null : si; PS.confirm = null; rr(); });
+    on('[data-plu]', 'click', (e) => { PS.peek = null; } );
     on('[data-plu]', 'click', (e) => moveStage(API, +e.currentTarget.dataset.plu, -1));
+    on('[data-pld]', 'click', () => { PS.peek = null; });
     on('[data-pld]', 'click', (e) => moveStage(API, +e.currentTarget.dataset.pld, 1));
-    on('[data-plx]', 'click', (e) => { const si = +e.currentTarget.dataset.plx; if (PS.confirm !== si) { PS.confirm = si; rr(); return; } PS.confirm = null; deleteStage(API, si); });
+    on('[data-plx]', 'click', (e) => { const si = +e.currentTarget.dataset.plx; if (PS.confirm !== si) { PS.confirm = si; rr(); return; } PS.confirm = null; PS.peek = null; deleteStage(API, si); });
     on('[data-plbe]', 'click', (e) => { const si = openStage(); activate(si, +e.currentTarget.dataset.plbe); rr(); });
     on('[data-plbc]', 'click', () => { ACT = null; rr(); });
     on('[data-plbx]', 'click', (e) => { const si = openStage(), bi = +e.currentTarget.dataset.plbx, s = PS.stages[si]; s.blocks.splice(bi, 1);
@@ -489,7 +501,7 @@
       const a = e.currentTarget.dataset.pl;
       if (a === 'new') { const keep = PS.client; PS = Object.assign(blank(), { view: 'build', client: keep, base: baseFormula(API) }); ACT = null; rr(); return; }
       if (a === 'back') { const keep = PS.client; PS = blank(); PS.client = keep; ACT = null; rr(); return; }
-      if (a === 'stage') { PS.stages.push({ name: '', nameTouched: false, after: '', blocks: [E.fresh(null)], saved: false, open: true }); PS.confirm = null; activate(PS.stages.length - 1, 0); rr(); return; }
+      if (a === 'stage') { PS.stages.push({ name: '', nameTouched: false, after: '', blocks: [E.fresh(null)], saved: false, open: true }); PS.confirm = null; PS.peek = null; activate(PS.stages.length - 1, 0); rr(); return; }
       if (a === 'block') { const si = openStage(), s = PS.stages[si]; s.blocks = s.blocks.filter((st) => st.scn); s.blocks.push(E.fresh(null)); activate(si, s.blocks.length - 1); rr(); return; }
       if (a === 'cancel') {
         const si = openStage(), s = PS.stages[si]; ACT = null;

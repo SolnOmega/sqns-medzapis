@@ -1,8 +1,9 @@
-/* SQNS · Помощник медзаписи — ПЕЧАТЬ ДОКУМЕНТОВ (план лечения; акты — позже).
+/* SQNS · Помощник медзаписи — ПЕЧАТЬ ДОКУМЕНТОВ (план лечения, акт выполненных работ).
  * Документ собирается из данных SQNS в момент печати: состав, цены, скидки, «оказано» — из плана SQNS, без пересчёта сумм.
  * Названия этапов — из этапов SQNS, «примерно через» — из рецепта плана (комментарий плана, см. plan.js).
  * Реквизиты клиники, логотип, кто подписывает и тексты — в «Настройках печати»: хранятся только в этом браузере
  * (localStorage домена SQNS), в код и в репозиторий не попадают. Перенос на другой ПК — экспорт/импорт файлом.
+ * Акт — по услугам открытого визита (VisitFormController: visitItems, итоги со скидкой визита).
  * Печать — через скрытый iframe и окно печати браузера (там же «Сохранить как PDF»). Вёрстка — под ч/б лазерный принтер.
  */
 (function () {
@@ -21,6 +22,8 @@
   /* ---------------- настройки ---------------- */
   const DEF_TEXTS = {
     planConsent: 'С планом лечения и ориентировочной стоимостью ознакомлен(а), согласен(на)',
+    actNote: 'Вышеперечисленные услуги оказаны полностью и в срок. Заказчик претензий по объёму, качеству и срокам оказания услуг не имеет.',
+    actPatient: 'Услуги принял(а). Заказчик (пациент)',
     planNote: 'План лечения является ориентировочным. Объём и стоимость лечения могут измениться по клиническим показаниям, о чём пациент информируется заранее. Сроки между этапами указаны примерно и зависят от заживления и индивидуальных особенностей.',
   };
   const DOCS_LIST = [['plan', 'План лечения'], ['act', 'Акт']];
@@ -135,11 +138,17 @@
   .tot .big td{font-size:12pt;font-weight:700;border-top:1.5px solid #000;padding-top:4px}
   .tot .mut td{font-size:8.5pt;color:#222}
   .note{margin-top:10px;font-size:7.8pt;color:#222;line-height:1.45;break-inside:avoid;white-space:pre-line}
-  .sig{display:flex;gap:28px;margin-top:16px;break-inside:avoid} .sig>div{flex:1} .sig>div.e{visibility:hidden}
-  .sig .cap{font-size:8.5pt;min-height:24px;white-space:pre-line}
-  .line{display:flex;align-items:flex-end;gap:8px;margin-top:18px;font-size:8.5pt}
-  .line i{flex:1;border-bottom:.75px solid #000;height:1px} .line .who{white-space:nowrap}
-  .hint{font-size:7pt;color:#444;display:flex;justify-content:space-between;margin-top:2px}
+  .sig{display:grid;grid-template-columns:1fr 1fr;column-gap:28px;margin-top:16px;break-inside:avoid}
+  .sig .cap{font-size:8.5pt;white-space:pre-line;align-self:end}
+  .sig .line{display:flex;align-items:flex-end;gap:8px;height:11mm;font-size:8.5pt}
+  .sig .line i{flex:1;border-bottom:.75px solid #000;height:0}
+  .sig .who{flex:none;width:34mm;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sig .hint{font-size:7pt;color:#444;display:flex;justify-content:space-between;margin-top:2px}
+  .sig .e{visibility:hidden}
+  .words{text-align:right;font-size:8.5pt;margin-top:4px;break-inside:avoid}
+  .info{display:flex;flex-wrap:wrap;gap:4px 24px;border:1px solid #000;padding:5px 10px;margin:4px 0 8px;font-size:9.5pt}
+  .info span{color:#444;font-size:7pt;display:block;text-transform:uppercase;letter-spacing:.4px}
+  .ac td.n,.ac th.n{width:8mm;text-align:center}
   `;
   const cssStr = (s) => '"' + String(s || '').replace(/[\\"]/g, '\\$&').replace(/[\r\n]+/g, ' ') + '"';
   function headerHtml(s) {
@@ -147,10 +156,30 @@
     if (!s.logo && !o.name && !lines.length) return '';
     return '<div class="hd">' + (s.logo ? '<img src="' + s.logo + '" alt="">' : '') + '<div class="org">' + (o.name ? '<b>' + esc(o.name) + '</b>' : '') + lines.map(esc).join('<br>') + '</div></div>';
   }
+  // подписи: сетка 2 колонки × 3 строки (подпись над линией, линия, «подпись»): линии всегда на одном уровне,
+  // что бы ни было написано над ними; место под ФИО — фиксированной ширины, линии одной длины
   function sigHtml(capLeft, whoLeft, sg) {
-    const left = '<div><div class="cap">' + esc(capLeft) + '</div><div class="line"><i></i><span class="who">' + esc(whoLeft) + '</span></div><div class="hint"><span>подпись</span><span>«___» __________ 20__ г.</span></div></div>';
-    const right = sg ? '<div><div class="cap">' + esc(sg.pos) + '</div><div class="line"><i></i><span class="who">' + esc(sg.fio) + '</span></div><div class="hint"><span>подпись</span><span>' + (sg.pos && /директор|руковод|главн/i.test(sg.pos) ? 'М. П.' : '') + '</span></div></div>' : '<div class="e"></div>';
-    return '<div class="sig">' + left + right + '</div>';
+    const mp = sg && sg.pos && /директор|руковод|главн/i.test(sg.pos) ? 'М. П.' : '';
+    const cell = (c, x) => '<div class="' + c + (x ? '' : ' e') + '">';
+    return '<div class="sig">' +
+      cell('cap', 1) + esc(capLeft) + '</div>' + cell('cap', sg) + esc(sg ? sg.pos : '') + '</div>' +
+      cell('line', 1) + '<i></i><span class="who">' + esc(whoLeft) + '</span></div>' + cell('line', sg) + '<i></i><span class="who">' + esc(sg ? sg.fio : '') + '</span></div>' +
+      cell('hint', 1) + '<span>подпись</span></div>' + cell('hint', sg) + '<span>подпись</span><span>' + mp + '</span></div></div>';
+  }
+  // сумма прописью: «Сорок пять тысяч восемьсот рублей 00 копеек»
+  function words(n) {
+    n = r2(n); let rub2 = Math.floor(n); const kop = Math.round((n - rub2) * 100);
+    const U = ['', 'один', 'два', 'три', 'четыре', 'пять', 'шесть', 'семь', 'восемь', 'девять'], UF = ['', 'одна', 'две'];
+    const T = ['десять', 'одиннадцать', 'двенадцать', 'тринадцать', 'четырнадцать', 'пятнадцать', 'шестнадцать', 'семнадцать', 'восемнадцать', 'девятнадцать'];
+    const D = ['', '', 'двадцать', 'тридцать', 'сорок', 'пятьдесят', 'шестьдесят', 'семьдесят', 'восемьдесят', 'девяносто'];
+    const H = ['', 'сто', 'двести', 'триста', 'четыреста', 'пятьсот', 'шестьсот', 'семьсот', 'восемьсот', 'девятьсот'];
+    const pl = (x, a, b, c) => { const m = x % 10, h = x % 100; return m === 1 && h !== 11 ? a : m >= 2 && m <= 4 && (h < 12 || h > 14) ? b : c; };
+    const tri = (x, fem) => { const o = [H[Math.floor(x / 100)]], d = x % 100; if (d >= 10 && d < 20) o.push(T[d - 10]); else { o.push(D[Math.floor(d / 10)]); o.push(fem && d % 10 < 3 ? UF[d % 10] : U[d % 10]); } return o.filter(Boolean).join(' '); };
+    const parts = []; const G = [[1e9, 'миллиард', 'миллиарда', 'миллиардов', 0], [1e6, 'миллион', 'миллиона', 'миллионов', 0], [1e3, 'тысяча', 'тысячи', 'тысяч', 1]];
+    G.forEach(([v, a, b, c, f]) => { const x = Math.floor(rub2 / v); if (x) { parts.push(tri(x, f) + ' ' + pl(x, a, b, c)); rub2 %= v; } });
+    if (rub2 || !parts.length) parts.push(rub2 ? tri(rub2, 0) : 'ноль');
+    const R = Math.floor(n), t = parts.join(' ').replace(/\s+/g, ' ').trim();
+    return t[0].toUpperCase() + t.slice(1) + ' ' + pl(R, 'рубль', 'рубля', 'рублей') + ' ' + String(kop).padStart(2, '0') + ' ' + pl(kop, 'копейка', 'копейки', 'копеек');
   }
   function planHtml(D, pt, s) {
     const nonU = !D.uniform, showT = D.teeth;
@@ -185,6 +214,62 @@
       '<div class="ttl"><h1>План лечения</h1><div class="dt">от ' + esc(D.date) + '</div></div>' + (D.title ? '<div class="sub">' + esc(D.title) + '</div>' : '') + ptH +
       body + '<div class="tot"><table>' + tot + '</table></div>' + (text(s, 'planNote') ? '<div class="note">' + esc(text(s, 'planNote')) + '</div>' : '') +
       sigHtml(text(s, 'planConsent'), who, signer(s, 'plan')) + '</body></html>';
+  }
+
+  /* ---------------- акт выполненных работ: данные открытого визита ---------------- */
+  function visitScope() {
+    const own = (o, k) => o && Object.prototype.hasOwnProperty.call(o, k);
+    const el = document.querySelector('[ng-controller="VisitFormController"]'); if (!el) return null;
+    let sc = null; try { sc = window.angular.element(el).scope(); } catch (e) { sc = null; }
+    while (sc && !(own(sc, 'form') && sc.form && Array.isArray(sc.form.visitItems))) sc = sc.$parent;
+    return sc;
+  }
+  function visitDate(F) {
+    const j = (F.journals || []).map((x) => x.startDate).find(Boolean);
+    if (j) return j;
+    const d = F.date || F.startDate;
+    if (d instanceof Date) return d.toLocaleDateString('ru-RU');
+    return dmy(d) || F.dateFormatted || new Date().toLocaleDateString('ru-RU');
+  }
+  function actData() {
+    const sc = visitScope(); if (!sc) return null;
+    const F = sc.form;
+    const rows = (F.visitItems || []).filter((it) => it && (it.name || it.service || it.commodity)).map((it) => {
+      const qty = +it.qty || 0, price = +it.sellPrice || 0, full = r2(qty * price);
+      const sum = it.paySum != null && it.paySum !== '' ? r2(it.paySum) : full;
+      return { name: stripCode(it.name || (it.service && it.service.name) || (it.commodity && it.commodity.name)), teeth: (it.teeth || []).map(String).sort(), qty, price, full, sum, disc: full ? r2(100 * (1 - sum / full)) : 0 };
+    });
+    const full = r2(rows.reduce((a, x) => a + x.full, 0)), sum = r2(rows.reduce((a, x) => a + x.sum, 0));
+    // скидка SQNS в визите — процент без округления, копейки округления — на одну строку: «одинаковая» с допуском
+    const p0 = full ? 100 * (1 - sum / full) : 0, uniform = rows.every((x) => Math.abs(x.disc - p0) < 0.1);
+    const c = F.clientInfo || {}, e = F.employee || {};
+    const by = c.birthDay && c.birthMonth && c.birthYear ? String(c.birthDay).padStart(2, '0') + '.' + String(c.birthMonth).padStart(2, '0') + '.' + c.birthYear : '';
+    return { id: F.id || '', date: visitDate(F), rows, full, sum, uniform, pct: uniform ? r2(p0) : null, teeth: rows.some((x) => x.teeth.length),
+      doctor: e.initialsName || e.fullName || '', pt: { fio: c.fullName || c.name || '', ini: c.initialsName || '', birth: dmy(c.birthDate) || by, card: c.medicalRecord || '' } };
+  }
+  function actHtml(D, s) {
+    const nonU = !D.uniform, showT = D.teeth, pt = D.pt;
+    const cols = '<colgroup><col style="width:8mm"><col>' + (showT ? '<col style="width:21mm">' : '') + '<col style="width:13mm"><col style="width:17mm">' + (nonU ? '<col style="width:15mm">' : '') + '<col style="width:25mm"></colgroup>';
+    const head = '<tr><th class="n">№</th><th>Услуга</th>' + (showT ? '<th>Зубы</th>' : '') + '<th class="c">Кол-во</th><th class="r">Цена</th>' + (nonU ? '<th class="r">Скидка</th>' : '') + '<th class="r">Сумма</th></tr>';
+    const rows = D.rows.map((x, i) => '<tr><td class="n">' + (i + 1) + '</td><td>' + esc(x.name) + '</td>' + (showT ? '<td class="tt">' + esc(x.teeth.map(fmtT).join(', ')) + '</td>' : '') +
+      '<td class="c">' + num(x.qty) + '</td><td class="r">' + num(x.price) + '</td>' + (nonU ? '<td class="r">' + (Math.abs(x.disc) >= 0.01 ? num(x.disc) + ' %' : '—') + '</td>' : '') + '<td class="r">' + num(nonU ? x.sum : x.full) + '</td></tr>').join('');
+    const disc = r2(D.full - D.sum);
+    let tot = '';
+    if (disc > 0.004) tot += '<tr class="mut"><td>Сумма</td><td class="r">' + rub(D.full) + '</td></tr><tr class="mut"><td>Скидка' + (D.pct ? ' ' + num(D.pct) + ' %' : '') + '</td><td class="r">− ' + rub(disc) + '</td></tr>';
+    tot += '<tr class="big"><td>Итого</td><td class="r">' + rub(D.sum) + '</td></tr>';
+    const who = pt.ini || pt.fio || '', no = D.id ? ' № ' + D.id : '';
+    const foot = 'Акт' + no + (who ? ' · ' + who : '') + ' · ' + D.date;
+    const info = '<div class="info">' + (pt.fio ? '<div><span>Заказчик (пациент)</span>' + esc(pt.fio) + '</div>' : '') + (pt.birth ? '<div><span>Дата рождения</span>' + esc(pt.birth) + '</div>' : '') +
+      (pt.card ? '<div><span>Медкарта</span>№ ' + esc(pt.card) + '</div>' : '') + (D.doctor ? '<div><span>Врач</span>' + esc(D.doctor) + '</div>' : '') + '</div>';
+    return '<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><title>' + esc('Акт' + no + (who ? ' — ' + who : '') + ' — ' + D.date) + '</title><style>' +
+      '@page{size:A4;margin:12mm 12mm 14mm 12mm;@bottom-left{content:' + cssStr(foot) + ';font:7.5pt Arial,sans-serif;color:#444}@bottom-right{content:"стр. " counter(page) " из " counter(pages);font:7.5pt Arial,sans-serif;color:#444}}' +
+      PCSS + '</style></head><body>' + headerHtml(s) +
+      '<div class="ttl"><h1>Акт выполненных работ' + esc(no) + '</h1><div class="dt">от ' + esc(D.date) + '</div></div><div class="sub">об оказании медицинских (стоматологических) услуг</div>' + info +
+      '<div class="st ac"><table>' + cols + head + rows + '</table></div>' +
+      '<div class="tot"><table>' + tot + '</table></div>' +
+      '<div class="words">Всего оказано услуг: ' + D.rows.length + ', на сумму ' + rub(D.sum) + ' (' + esc(words(D.sum)) + ')</div>' +
+      (text(s, 'actNote') ? '<div class="note">' + esc(text(s, 'actNote')) + '</div>' : '') +
+      sigHtml(text(s, 'actPatient'), who, signer(s, 'act')) + '</body></html>';
   }
 
   /* ---------------- печать ---------------- */
@@ -233,10 +318,15 @@
       h += plans.length ? plans.map((p) => '<div class="pr-doc"><span class="pr-t"><b>' + esc(p.title || 'Без названия') + '</b><small>' + esc(p.dateFormatted || '') + ' · ' + rub(+p.totalPrice || 0) + '</small></span>' +
         (+p.applied ? badge('ok', 'активный') : '') + '<button class="pr-btn" data-prp="' + esc(p.__id__) + '"' + (BUSY ? ' disabled' : '') + '>🖨 Печать</button></div>').join('') : '<div class="hint">У пациента пока нет планов</div>';
     }
-    h += '</div><div class="sec"><h2>Акт выполненных работ</h2><div class="card"><div class="hint">Скоро.</div></div></div>';
+    h += '</div><div class="sec"><h2>Акт выполненных работ</h2>';
+    const A = (() => { try { return actData(); } catch (e) { return null; } })();
+    h += !A ? '<div class="card empty">Откройте визит пациента — акт печатается по услугам визита.</div>'
+      : !A.rows.length ? '<div class="card"><div class="hint">В открытом визите нет услуг.</div></div>'
+      : '<div class="pr-doc"><span class="pr-t"><b>Акт по визиту от ' + esc(A.date) + '</b><small>услуг: ' + A.rows.length + ' · к оплате ' + rub(A.sum) + '</small></span><button class="pr-btn" data-pr="act"' + (BUSY ? ' disabled' : '') + '>🖨 Печать</button></div>';
+    h += '</div>';
     const s = getSet();
     if (!s.org.name && !s.logo) h += '<div class="sec"><div class="iss"><div class="warn">⚠️ Шапка документов не заполнена — откройте «Настройки печати»</div></div></div>';
-    return { body: h, foot: '<button class="btn sec2" data-pr="settings">⚙ Настройки печати</button><span style="flex:1"></span><button class="btn sec2" data-pr="demo">Пробная печать</button>' };
+    return { body: h, foot: '<button class="btn sec2" data-pr="settings">⚙ Настройки печати</button><span style="flex:1"></span><button class="btn sec2" data-pr="demo">Пробный план</button><button class="btn sec2" data-pr="demoact">Пробный акт</button>' };
   }
   function renderSettings() {
     const s = DRAFT || (DRAFT = getSet()), o = s.org;
@@ -253,7 +343,8 @@
       row('Должность', '<input type="text" data-prf="pos" value="' + esc(s.fixed.pos) + '" placeholder="Директор">') + row('ФИО', '<input type="text" data-prf="fio" value="' + esc(s.fixed.fio) + '" placeholder="Фамилия И. О.">') +
       '<div class="hint">Должность и ФИО — для варианта «Постоянное лицо». «Текущий врач» — врач, выбранный в скрипте: ФИО из SQNS, должность — в настройках врача (⚙ у врача).</div></div></div>';
     h += '<div class="sec"><h2>Тексты плана лечения</h2><div class="card">' + ta('planConsent', 'Согласие пациента (над подписью)') + ta('planNote', 'Приписка внизу плана') + '</div></div>';
-    return { body: h, foot: '<button class="btn sec2" data-pr="export">⬇ Экспорт</button><button class="btn sec2" data-pr="import">⬆ Импорт</button><span style="flex:1"></span><button class="btn sec2" data-pr="demo">Пробная печать</button><button class="btn pri" data-pr="save" style="flex:none">Сохранить</button>' };
+    h += '<div class="sec"><h2>Тексты акта</h2><div class="card">' + ta('actNote', 'Текст под таблицей') + ta('actPatient', 'Над подписью пациента') + '</div></div>';
+    return { body: h, foot: '<button class="btn sec2" data-pr="export">⬇ Экспорт</button><button class="btn sec2" data-pr="import">⬆ Импорт</button><span style="flex:1"></span><button class="btn sec2" data-pr="demo">Пробный план</button><button class="btn sec2" data-pr="demoact">Пробный акт</button><button class="btn pri" data-pr="save" style="flex:none">Сохранить</button>' };
   }
   function pickFile(accept) {
     return new Promise((res) => {
@@ -283,6 +374,8 @@
       if (a === 'settings') { VW = 'settings'; DRAFT = getSet(); rr(); return; }
       if (a === 'back') { if (DRAFT && JSON.stringify(DRAFT) !== JSON.stringify(getSet()) && !window.confirm('Изменения настроек не сохранены. Выйти без сохранения?')) return; VW = 'list'; DRAFT = null; rr(); return; }
       if (a === 'demo') { await printHtml(demoHtml(DRAFT)); return; }
+      if (a === 'demoact') { await printHtml(demoActHtml(DRAFT)); return; }
+      if (a === 'act') { if (BUSY) return; BUSY = true; rr(); try { await printAct(API); } finally { BUSY = false; rr(); } return; }
       if (a === 'save') { const sv = Object.assign({}, DRAFT); Object.keys(sv.texts).forEach((k) => { if (String(sv.texts[k]).trim() === '' || sv.texts[k] === DEF_TEXTS[k]) delete sv.texts[k]; });
         if (putSet(sv)) { API.toast('Настройки печати сохранены', 'ok'); VW = 'list'; DRAFT = null; } else API.toast('Не удалось сохранить: место в браузере закончилось (уменьшите логотип)', 'bad'); rr(); return; }
       if (a === 'logo') { const f = await pickFile('image/png,image/jpeg,image/svg+xml,image/*'); if (!f) return;
@@ -303,6 +396,20 @@
     });
   }
   // пробная печать: выдуманный пациент и план, шапка и подписи — из настроек (в окне настроек — с несохранёнными правками)
+  async function printAct(API) {
+    try {
+      const D = actData();
+      if (!D) { API.toast('Откройте визит пациента', 'warn'); return; }
+      if (!D.rows.length) { API.toast('В визите нет услуг', 'warn'); return; }
+      await printHtml(actHtml(D, getSet()));
+    } catch (e) { API.toast('Печать акта: ' + ((e && e.message) || e), 'bad'); }
+  }
+  function demoActHtml(s) {
+    const rows = [{ name: 'Прием (осмотр, консультация) врача-стоматолога-терапевта повторный', teeth: [], qty: 1, price: 1200 }, { name: 'Анестезия инфильтрационная', teeth: ['26'], qty: 1, price: 900 },
+      { name: 'Восстановление зуба пломбой из композитного материала', teeth: ['26'], qty: 1, price: 9500 }].map((x) => Object.assign(x, { full: x.qty * x.price, sum: r2(x.qty * x.price * 0.95), disc: 5 }));
+    return actHtml({ id: '000000', date: new Date().toLocaleDateString('ru-RU'), rows, full: 11600, sum: 11020, uniform: true, pct: 5, teeth: true, doctor: 'Петрова П. П. (пример)',
+      pt: { fio: 'Иванов Иван Иванович (пример)', ini: 'Иванов И. И.', birth: '01.01.1980', card: '0000' } }, s || getSet());
+  }
   function demoHtml(s) { const D0 = demoParts(); return planHtml(D0.D, D0.pt, s || getSet()); }
   function demoParts() {
     const h = { D: null, pt: { fio: 'Иванов Иван Иванович (пример)', ini: 'Иванов И. И.', birth: '01.01.1980', card: '0000' } };
@@ -318,5 +425,5 @@
   }
   function leave() { VW = 'list'; DRAFT = null; }
 
-  globalThis.SQNSMZ_PRINT = { css: CSS, render, bind, leave, printPlan, _test: { planData, planHtml, demoHtml, getSet, putSet, signer, stripCode, LSK } };
+  globalThis.SQNSMZ_PRINT = { css: CSS, render, bind, leave, printPlan, printAct, _test: { planData, planHtml, demoHtml, actData, actHtml, demoActHtml, words, getSet, putSet, signer, stripCode, LSK } };
 })();

@@ -587,7 +587,8 @@
     if (SS.done && !PL) {
       h += '<div class="sec"><div class="card done"><b>Добавлено в визит: ' + SS.done.length + '</b>' +
         (SS.fText && SS.fText.length ? '<div class="fdiff" style="margin-top:8px"><div class="flbl">Внесено в зубную формулу</div>' + fDiffH(SS.fText) + '</div>' : '') +
-        '<div class="hint" style="margin:6px 0 0">Проверьте строки услуг' + (SS.fText && SS.fText.length ? ' и формулу' : '') + ' и нажмите «Сохранить» в визите. Дневник теперь можно заполнить по этим услугам.</div></div></div>';
+        '<div class="hint" style="margin:6px 0 0">Проверьте строки услуг' + (SS.fText && SS.fText.length ? ' и формулу' : '') + ' и нажмите «Сохранить» в визите. Дневник теперь можно заполнить по этим услугам.</div>' +
+        (globalThis.SQNSMZ_PRINT && catOk('print') ? '<div style="margin-top:8px"><button class="vd-b" id="svcact" title="Акт по всем услугам визита">🖨 Акт выполненных работ</button></div>' : '') + '</div></div>';
     }
     if (sc) {
       h += '<div class="sec"><h2>' + esc(sc.icon + ' ' + sc.title) + '</h2><div class="card">' + (sc.needTeeth && !sc.params.some((x) => x.type === 'teethPick') ? renderTeeth(API, sc.teethTitle) : '') + renderList(sc.params, API) + '</div></div>';
@@ -695,6 +696,7 @@
     on('[data-vdp],[data-vds]', 'keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') applyVisitDisc(API); });
     const add = P.querySelector('#svcadd'); if (add) add.onclick = () => doAdd(API);
     const undo = P.querySelector('#svcundo'); if (undo) undo.onclick = () => doUndo(API);
+    const act = P.querySelector('#svcact'); if (act) act.onclick = async () => { act.disabled = true; try { await globalThis.SQNSMZ_PRINT.printAct(API); } finally { act.disabled = false; } };
     const dia = P.querySelector('#svcdiary'); if (dia) dia.onclick = () => API.gotoDiary();
   }
 

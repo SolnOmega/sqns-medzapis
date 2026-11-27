@@ -41,23 +41,26 @@
   const clientOf = (tab) => { try { const c = tab.getClientInfo && tab.getClientInfo(); return c && c.id ? c.id : null; } catch (e) { return null; } };
   async function showPlanTab() {
     const a = document.querySelector('a[href="#treatmentPlan"]');
-    if (a && a.parentElement && !a.parentElement.classList.contains('ui-state-active')) { a.click(); await sleep(600); }
+    if (!a || !a.parentElement || a.parentElement.classList.contains('ui-state-active')) return;
+    a.click();
+    for (let i = 0; i < 12 && !a.parentElement.classList.contains('ui-state-active'); i++) await sleep(50);
+    await sleep(100);
   }
   async function waitForm(pred, ms) {
-    for (let i = 0; i < (ms || 8000) / 200; i++) {
+    for (let i = 0; i < (ms || 8000) / 100; i++) {
       const fs = formScope(), f = fs && getF(fs);
       if (f && pred(f)) return fs;
-      await sleep(200);
+      await sleep(100);
     }
     return null;
   }
   // состав плана SQNS догружает после выбора: ждём, пока число строк перестанет меняться
   async function settle(fs) {
     let n = -1;
-    for (let i = 0; i < 15; i++) {
-      await sleep(250);
+    for (let i = 0; i < 20; i++) {
+      await sleep(150);
       const f = getF(formScope() || fs), k = ((f && f.treatmentPlanItems) || []).length + ':' + ((f && f.treatmentPlanStages) || []).length;
-      if (k === n && i >= 2) break;
+      if (k === n && i >= 1) break;
       n = k;
     }
     return formScope() || fs;
@@ -228,7 +231,7 @@
     old.forEach((it) => fs.removeTreatmentPlanItemRow(it)); applyRoot(fs);
   }
   async function run(API, fn, okMsg) {
-    if (PS.busy) return;
+    if (PS.busy || PS.verifying) return;
     PS.busy = true; PS.error = ''; API.rerender();
     try { await fn(); if (okMsg) API.toast(okMsg, 'ok'); }
     catch (e) { PS.error = String((e && e.message) || e); API.toast('Ошибка: ' + PS.error, 'bad'); }
@@ -307,30 +310,58 @@
   }
 
   /* ---------------- открыть существующий план ---------------- */
-  function openPlan(API, p) {
-    return run(API, async () => {
-      await showPlanTab();
-      const tab = tabScope(); if (!tab) throw new Error('Вкладка «Планы лечения» не найдена');
+  // этапы плана по данным SQNS + рецепт: совпал отпечаток — этап с блоками, иначе «только просмотр»
+  function stagesFromSqns(f, R) {
+    const items = f.treatmentPlanItems || [], sq = sqStages(f), rs = (R && Array.isArray(R.stages)) ? R.stages : [];
+    let groups = sq.map((x) => ({ sq: x.id, name: x.name, items: items.filter((it) => it.stageID === x.id) }));
+    const loose = items.filter((it) => it.stageID == null || !sq.some((x) => x.id === it.stageID));
+    if (!sq.length) groups = items.length || rs.length ? [{ flat: true, name: f.title, items }] : [];
+    else if (loose.length) groups.push({ loose: true, name: 'Без этапа', items: loose });
+    return groups.map((g, k) => {
+      const r = g.loose ? null : rs[k];
+      const base = { saved: true, sq: g.sq || null, flat: !!g.flat, loose: !!g.loose, after: (r && r.after) || '' };
+      if (r && !r.ro && Array.isArray(r.blocks) && r.fp === fpItems(g.items)) {
+        return Object.assign(base, { name: r.nameTouched ? g.flat ? r.name : g.name : '', nameTouched: !!r.nameTouched, fp: r.fp, blocks: r.blocks.map((o) => E.stateFrom(o)) });
+      }
+      return Object.assign(base, { ro: true, changed: !!(r && !r.ro), name: g.flat ? (r && r.name) || 'Этап' : g.name, nameTouched: true, blocks: [],
+        items: g.items.filter(isSvc).map((it) => ({ name: it.name, teeth: it.teeth || [], qty: +it.qty || 0, sum: +it.sum || 0, provided: +it.providedQty > 0 })) });
+    });
+  }
+  // открыть план в SQNS (если он ещё не открыт там) и дождаться состава
+  async function loadSqnsPlan(p) {
+    await showPlanTab();
+    const tab = tabScope(); if (!tab) throw new Error('Вкладка «Планы лечения» не найдена');
+    let fs = formScope();
+    if (!(fs && getF(fs) && getF(fs).id === p.id)) {
       tab.selectTreatmentPlan(p.__id__); applyRoot(tab);
-      let fs = await waitForm((f) => f.id === p.id); if (!fs) throw new Error('План не открылся');
-      fs = await settle(fs);
-      const f = getF(fs), { user, recipe: R } = splitComment(f.comment), items = f.treatmentPlanItems || [], sq = sqStages(f);
-      const rs = (R && Array.isArray(R.stages)) ? R.stages : [];
-      let groups = sq.map((x) => ({ sq: x.id, name: x.name, items: items.filter((it) => it.stageID === x.id) }));
-      const loose = items.filter((it) => it.stageID == null || !sq.some((x) => x.id === it.stageID));
-      if (!sq.length) groups = items.length || rs.length ? [{ flat: true, name: f.title, items }] : [];
-      else if (loose.length) groups.push({ loose: true, name: 'Без этапа', items: loose });
-      const stages = groups.map((g, k) => {
-        const r = g.loose ? null : rs[k];
-        const base = { saved: true, sq: g.sq || null, flat: !!g.flat, loose: !!g.loose, after: (r && r.after) || '' };
-        if (r && !r.ro && Array.isArray(r.blocks) && r.fp === fpItems(g.items)) {
-          return Object.assign(base, { name: r.nameTouched ? g.flat ? r.name : g.name : '', nameTouched: !!r.nameTouched, fp: r.fp, blocks: r.blocks.map((o) => E.stateFrom(o)) });
-        }
-        return Object.assign(base, { ro: true, changed: !!(r && !r.ro), name: g.flat ? (r && r.name) || 'Этап' : g.name, nameTouched: true, blocks: [],
-          items: g.items.filter(isSvc).map((it) => ({ name: it.name, teeth: it.teeth || [], qty: +it.qty || 0, sum: +it.sum || 0, provided: +it.providedQty > 0 })) });
-      });
-      const keep = PS.client;
-      PS = Object.assign(blank(), { view: 'build', client: keep, planId: f.id, title: f.title || '', titleTouched: true, userComment: user, applied: !!f.applied, stages, base: baseFormula(API), hadRecipe: !!R });
+      fs = await waitForm((f) => f.id === p.id); if (!fs) throw new Error('План не открылся');
+    }
+    return getF(await settle(fs));
+  }
+  function openPlan(API, p) {
+    const keep = PS.client, sp = splitComment(p.comment), R = sp.recipe;
+    // план собран здесь: этапы видны сразу по рецепту из списка планов, сверка с SQNS — в фоне
+    if (R && Array.isArray(R.stages) && R.stages.length) {
+      const me = PS = Object.assign(blank(), { view: 'build', client: keep, planId: p.id, title: p.title || '', titleTouched: true, userComment: sp.user, applied: !!+p.applied, hadRecipe: true, verifying: true,
+        stages: R.stages.map((r) => (r.ro ? { saved: true, ro: true, name: r.name || 'Этап', nameTouched: true, after: r.after || '', blocks: [], items: [] }
+          : { saved: true, name: r.name || '', nameTouched: !!r.nameTouched, after: r.after || '', fp: r.fp, blocks: (r.blocks || []).map((o) => E.stateFrom(o)) })),
+        base: baseFormula(API) });
+      ACT = null; API.rerender();
+      (async () => {
+        try {
+          const f = await loadSqnsPlan(p);
+          if (PS !== me) return;
+          const sp2 = splitComment(f.comment);
+          Object.assign(me, { stages: stagesFromSqns(f, sp2.recipe), userComment: sp2.user, title: f.title || me.title, applied: !!f.applied, hadRecipe: !!sp2.recipe });
+          if (me.peek != null && me.peek >= me.stages.length) me.peek = null;
+        } catch (e) { if (PS === me) me.error = String((e && e.message) || e); }
+        if (PS === me) { me.verifying = false; API.rerender(); }
+      })();
+      return;
+    }
+    return run(API, async () => {
+      const f = await loadSqnsPlan(p), sp2 = splitComment(f.comment);
+      PS = Object.assign(blank(), { view: 'build', client: keep, planId: f.id, title: f.title || '', titleTouched: true, userComment: sp2.user, applied: !!f.applied, stages: stagesFromSqns(f, sp2.recipe), base: baseFormula(API), hadRecipe: !!sp2.recipe });
       ACT = null;
     });
   }
@@ -411,10 +442,11 @@
     }
     SET = null;
     const calcs = PS.stages.map((s, i) => (s.ro ? null : calcStage(i, laterRender)));
-    const openSi = PS.stages.findIndex((s) => s.open), B = PS.busy, ch = chain();
-    let h = '<div class="sec"><button class="link" data-pl="back"' + (B || openSi >= 0 ? ' disabled' : '') + '>← Все планы</button></div>';
+    const openSi = PS.stages.findIndex((s) => s.open), B = PS.busy || PS.verifying, ch = chain();
+    let h = '<div class="sec"><button class="link" data-pl="back"' + (PS.busy || openSi >= 0 ? ' disabled' : '') + '>← Все планы</button></div>';
     h += '<div class="sec"><div class="card"><div class="pl-in" style="margin:0"><label>Название плана</label><input type="text" data-plt="1" value="' + esc(PS.titleTouched ? PS.title : '') + '" placeholder="' + esc(autoTitle(calcs)) + '"></div>' +
       (PS.planId ? '' : '<div class="hint" style="margin-top:6px">План появится в SQNS при сохранении первого этапа.</div>') +
+      (PS.verifying ? '<div class="hint" style="margin-top:6px">⏳ Сверяю с планом в SQNS — правка станет доступна через пару секунд</div>' : '') +
       (PS.planId && !PS.hadRecipe && PS.stages.some((s) => s.ro) ? '<div style="margin-top:6px">' + badge('warn', 'план собран не здесь — его этапы только для просмотра, новые этапы добавлять можно') + '</div>' : '') + '</div></div>';
     let total = 0, missing = false;
     PS.stages.forEach((s, si) => {

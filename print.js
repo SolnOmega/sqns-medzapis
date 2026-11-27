@@ -137,6 +137,7 @@
   .tot table{width:auto;min-width:75mm} .tot td{border:0;padding:2px 6px}
   .tot .big td{font-size:12pt;font-weight:700;border-top:1.5px solid #000;padding-top:4px}
   .tot .mut td{font-size:8.5pt;color:#222}
+  .tot .pay td{font-size:10.5pt;font-weight:700;border-top:.75px solid #000}
   .note{margin-top:10px;font-size:7.8pt;color:#222;line-height:1.45;break-inside:avoid;white-space:pre-line}
   .sig{display:grid;grid-template-columns:1fr 1fr;column-gap:28px;margin-top:16px;break-inside:avoid}
   .sig .cap{font-size:8.5pt;white-space:pre-line;align-self:end}
@@ -242,9 +243,12 @@
     const full = r2(rows.reduce((a, x) => a + x.full, 0)), sum = r2(rows.reduce((a, x) => a + x.sum, 0));
     // скидка SQNS в визите — процент без округления, копейки округления — на одну строку: «одинаковая» с допуском
     const p0 = full ? 100 * (1 - sum / full) : 0, uniform = rows.every((x) => Math.abs(x.disc - p0) < 0.1);
+    // оплаты — функциями самого SQNS: paidTotal() = поступления + альтернативные оплаты + списания с депозита, dueTotal() = к оплате − оплачено
+    let paid = 0, due = 0;
+    try { paid = typeof F.paidTotal === 'function' ? r2(F.paidTotal()) : 0; due = typeof F.dueTotal === 'function' ? r2(F.dueTotal()) : r2(sum - paid); } catch (er) { paid = 0; due = 0; }
     const c = F.clientInfo || {}, e = F.employee || {};
     const by = c.birthDay && c.birthMonth && c.birthYear ? String(c.birthDay).padStart(2, '0') + '.' + String(c.birthMonth).padStart(2, '0') + '.' + c.birthYear : '';
-    return { id: F.id || '', date: visitDate(F), rows, full, sum, uniform, pct: uniform ? r2(p0) : null, teeth: rows.some((x) => x.teeth.length),
+    return { id: F.id || '', date: visitDate(F), rows, full, sum, paid, due, uniform, pct: uniform ? r2(p0) : null, teeth: rows.some((x) => x.teeth.length),
       doctor: e.initialsName || e.fullName || '', pt: { fio: c.fullName || c.name || '', ini: c.initialsName || '', birth: dmy(c.birthDate) || by, card: c.medicalRecord || '' } };
   }
   function actHtml(D, s) {
@@ -257,6 +261,8 @@
     let tot = '';
     if (disc > 0.004) tot += '<tr class="mut"><td>Сумма</td><td class="r">' + rub(D.full) + '</td></tr><tr class="mut"><td>Скидка' + (D.pct ? ' ' + num(D.pct) + ' %' : '') + '</td><td class="r">− ' + rub(disc) + '</td></tr>';
     tot += '<tr class="big"><td>Итого</td><td class="r">' + rub(D.sum) + '</td></tr>';
+    // «Оплачено» — если оплата есть; «К доплате» — только при частичной оплате
+    if (D.paid > 0.004) tot += '<tr class="mut"><td>Оплачено</td><td class="r">' + rub(D.paid) + '</td></tr>' + (D.due > 0.004 ? '<tr class="pay"><td>К доплате</td><td class="r">' + rub(D.due) + '</td></tr>' : '');
     const who = pt.ini || pt.fio || '', no = D.id ? ' № ' + D.id : '';
     const foot = 'Акт' + no + (who ? ' · ' + who : '') + ' · ' + D.date;
     const info = '<div class="info">' + (pt.fio ? '<div><span>Заказчик (пациент)</span>' + esc(pt.fio) + '</div>' : '') + (pt.birth ? '<div><span>Дата рождения</span>' + esc(pt.birth) + '</div>' : '') +
@@ -304,26 +310,31 @@
   .pr-lb img{max-width:100%;max-height:100%}
   .pr-sg{display:grid;grid-template-columns:110px 1fr;gap:8px;align-items:center;margin:7px 0} .pr-sg>label{font-size:12px;color:#475569;font-weight:600}
   .pr-ta{min-height:70px}
+  .pr-sp{display:flex;align-items:center;width:100%;border:1.5px solid #e2e8f0;background:#fff;border-radius:12px;padding:10px 12px;cursor:pointer;text-align:left;color:#0f172a}
+  .pr-sp:hover{border-color:#a5b4fc;background:#fafbff} .pr-spt{flex:1;font-size:13.5px;font-weight:700} .pr-cv{color:#6366f1;font-size:12px}
+  .pr-n{display:inline-block;min-width:20px;text-align:center;font-size:11px;font-weight:800;color:#fff;background:#6366f1;border-radius:10px;padding:1px 6px;margin-left:4px}
   .pr-tl{display:flex;justify-content:space-between;align-items:center;font-size:12px;color:#475569;font-weight:600;margin:10px 0 4px}
   `;
-  let VW = 'list', BUSY = false, DRAFT = null;
+  let VW = 'list', BUSY = false, DRAFT = null, PLOPEN = false;
   function render(API) {
     if (VW === 'settings') return renderSettings();
+    let h = '';
+    // акт по открытому визиту — первым, если он есть
+    const A = (() => { try { return actData(); } catch (e) { return null; } })();
+    if (A && A.rows.length) h += '<div class="sec"><h2>Акт выполненных работ</h2><div class="pr-doc"><span class="pr-t"><b>Акт по визиту от ' + esc(A.date) + '</b><small>услуг: ' + A.rows.length + ' · к оплате ' + rub(A.sum) +
+      (A.paid > 0.004 ? ' · оплачено ' + rub(A.paid) + (A.due > 0.004 ? ' · к доплате ' + rub(A.due) : '') : '') + '</small></span><button class="pr-btn" data-pr="act"' + (BUSY ? ' disabled' : '') + '>🖨 Печать</button></div></div>';
+    // планы лечения — под спойлером (их бывает много)
     const P = PLANV(), tab = P && P.sq ? P.sq.tabScope() : null;
-    let h = '<div class="sec"><h2>План лечения</h2>';
-    if (!P || !P.sq) h += '<div class="card"><div class="hint">Модуль плана не загружен.</div></div>';
-    else if (!tab) h += '<div class="card empty">Откройте карточку пациента — здесь появятся его планы лечения.</div>';
-    else {
-      const plans = P.sq.visiblePlans(tab).filter((p) => p.id).sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
-      h += plans.length ? plans.map((p) => '<div class="pr-doc"><span class="pr-t"><b>' + esc(p.title || 'Без названия') + '</b><small>' + esc(p.dateFormatted || '') + ' · ' + rub(+p.totalPrice || 0) + '</small></span>' +
+    const plans = tab ? P.sq.visiblePlans(tab).filter((p) => p.id).sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || ''))) : [];
+    h += '<div class="sec"><button class="pr-sp" data-pr="plans"><span class="pr-spt">Планы лечения' + (plans.length ? ' <span class="pr-n">' + plans.length + '</span>' : '') + '</span><span class="pr-cv">' + (PLOPEN ? '▴' : '▾') + '</span></button>';
+    if (PLOPEN) {
+      if (!P || !P.sq) h += '<div class="card"><div class="hint">Модуль плана не загружен.</div></div>';
+      else if (!tab) h += '<div class="card empty">Откройте карточку пациента — здесь появятся его планы лечения.</div>';
+      else h += plans.length ? plans.map((p) => '<div class="pr-doc"><span class="pr-t"><b>' + esc(p.title || 'Без названия') + '</b><small>' + esc(p.dateFormatted || '') + ' · ' + rub(+p.totalPrice || 0) + '</small></span>' +
         (+p.applied ? badge('ok', 'активный') : '') + '<button class="pr-btn" data-prp="' + esc(p.__id__) + '"' + (BUSY ? ' disabled' : '') + '>🖨 Печать</button></div>').join('') : '<div class="hint">У пациента пока нет планов</div>';
     }
-    h += '</div><div class="sec"><h2>Акт выполненных работ</h2>';
-    const A = (() => { try { return actData(); } catch (e) { return null; } })();
-    h += !A ? '<div class="card empty">Откройте визит пациента — акт печатается по услугам визита.</div>'
-      : !A.rows.length ? '<div class="card"><div class="hint">В открытом визите нет услуг.</div></div>'
-      : '<div class="pr-doc"><span class="pr-t"><b>Акт по визиту от ' + esc(A.date) + '</b><small>услуг: ' + A.rows.length + ' · к оплате ' + rub(A.sum) + '</small></span><button class="pr-btn" data-pr="act"' + (BUSY ? ' disabled' : '') + '>🖨 Печать</button></div>';
     h += '</div>';
+    if (!A) h += '<div class="hint" style="margin:0 4px 12px">Акт выполненных работ появится здесь, когда открыт визит с услугами.</div>';
     const s = getSet();
     if (!s.org.name && !s.logo) h += '<div class="sec"><div class="iss"><div class="warn">⚠️ Шапка документов не заполнена — откройте «Настройки печати»</div></div></div>';
     return { body: h, foot: '<button class="btn sec2" data-pr="settings">⚙ Настройки печати</button><span style="flex:1"></span><button class="btn sec2" data-pr="demo">Пробный план</button><button class="btn sec2" data-pr="demoact">Пробный акт</button>' };
@@ -374,6 +385,7 @@
       if (a === 'settings') { VW = 'settings'; DRAFT = getSet(); rr(); return; }
       if (a === 'back') { if (DRAFT && JSON.stringify(DRAFT) !== JSON.stringify(getSet()) && !window.confirm('Изменения настроек не сохранены. Выйти без сохранения?')) return; VW = 'list'; DRAFT = null; rr(); return; }
       if (a === 'demo') { await printHtml(demoHtml(DRAFT)); return; }
+      if (a === 'plans') { PLOPEN = !PLOPEN; rr(); return; }
       if (a === 'demoact') { await printHtml(demoActHtml(DRAFT)); return; }
       if (a === 'act') { if (BUSY) return; BUSY = true; rr(); try { await printAct(API); } finally { BUSY = false; rr(); } return; }
       if (a === 'save') { const sv = Object.assign({}, DRAFT); Object.keys(sv.texts).forEach((k) => { if (String(sv.texts[k]).trim() === '' || sv.texts[k] === DEF_TEXTS[k]) delete sv.texts[k]; });
@@ -407,7 +419,7 @@
   function demoActHtml(s) {
     const rows = [{ name: 'Прием (осмотр, консультация) врача-стоматолога-терапевта повторный', teeth: [], qty: 1, price: 1200 }, { name: 'Анестезия инфильтрационная', teeth: ['26'], qty: 1, price: 900 },
       { name: 'Восстановление зуба пломбой из композитного материала', teeth: ['26'], qty: 1, price: 9500 }].map((x) => Object.assign(x, { full: x.qty * x.price, sum: r2(x.qty * x.price * 0.95), disc: 5 }));
-    return actHtml({ id: '000000', date: new Date().toLocaleDateString('ru-RU'), rows, full: 11600, sum: 11020, uniform: true, pct: 5, teeth: true, doctor: 'Петрова П. П. (пример)',
+    return actHtml({ id: '000000', date: new Date().toLocaleDateString('ru-RU'), rows, full: 11600, sum: 11020, paid: 5000, due: 6020, uniform: true, pct: 5, teeth: true, doctor: 'Петрова П. П. (пример)',
       pt: { fio: 'Иванов Иван Иванович (пример)', ini: 'Иванов И. И.', birth: '01.01.1980', card: '0000' } }, s || getSet());
   }
   function demoHtml(s) { const D0 = demoParts(); return planHtml(D0.D, D0.pt, s || getSet()); }

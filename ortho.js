@@ -551,7 +551,10 @@
   let H = { ref: null, past: [], fut: [] };
   const hist = (M) => { if (H.ref !== M) H = { ref: M, past: [], fut: [] }; return H; };
   const snap = (M) => JSON.stringify({ t: M.t, links: M.links });
-  const restore = (M, s) => { const o2 = JSON.parse(s); M.t = o2.t; M.links = o2.links; M.anchor = null; };
+  // поля сценария, которые ✕ возвращает к исходному: полная потеря, частичный протез, виниры
+  const RESET_RE = /^(loss|lk|lf|larm|lbase|lspoonR?|ln|lr|lm|lc|ls|lsup|lmuN|lb|pk|pb|parm|pbase|plk2?)[UL]$|^(vwax|waxV|vmock|mockN)$/;
+  // снимок с полями (P) — только у сброса; при отмене поля возвращаются и считаются заданными врачом
+  const restore = (M, s, p, ctx) => { const o2 = JSON.parse(s); M.t = o2.t; M.links = o2.links; M.anchor = null; if (o2.P && p) { Object.assign(p, o2.P); if (ctx) ctx.touch(Object.keys(o2.P)); } };
   const remember = (M) => { const h = hist(M); h.past.push(snap(M)); if (h.past.length > 60) h.past.shift(); h.fut = []; };
   const ERASER = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#475569" stroke-width="1.8" stroke-linejoin="round"><path d="M3.5 14.5 13 5a2 2 0 0 1 2.8 0l3.7 3.7a2 2 0 0 1 0 2.8L11 20H7.5z" fill="#fbcfe0"/><path d="M8 10l6.5 6.5"/><path d="M11 20h9.5"/></svg>';
 
@@ -616,7 +619,7 @@
     return '<div class="oblk"><div class="flbl" style="font-size:13px;margin-bottom:6px">' + esc(pr.label || 'Конструкции') + '</div>' + fromH + pal + hint + msg + svgMap(p) + legend +
       (sum ? '<div class="osum">' + sum + '</div>' : '') + '</div>';
   }
-  function bind(P, pr, p, re) {
+  function bind(P, pr, p, re, ctx) {
     const M = p.omap;
     const on = (sel, ev, fn) => P.querySelectorAll(sel).forEach((el) => el.addEventListener(ev, fn));
     on('[data-obr]', 'click', (e) => {
@@ -633,9 +636,17 @@
       re();
     });
     on('[data-olk]', 'click', (e) => { e.stopPropagation(); remember(M); const k = e.currentTarget.dataset.olk; M.links[k] = !M.links[k]; cleanLinks(M); re(); });
-    on('[data-oundo]', 'click', () => { const h = hist(M); if (!h.past.length) return; h.fut.push(snap(M)); restore(M, h.past.pop()); re(); });
-    on('[data-oredo]', 'click', () => { const h = hist(M); if (!h.fut.length) return; h.past.push(snap(M)); restore(M, h.fut.pop()); re(); });
-    on('[data-oclr]', 'click', () => { remember(M); M.t = {}; M.links = {}; M.anchor = null; M.loaded = false; re(); });
+    const keysP = () => Object.keys(p).filter((k) => RESET_RE.test(k));
+    const snapP = () => { const o2 = JSON.parse(snap(M)); o2.P = {}; keysP().forEach((k) => { o2.P[k] = p[k]; }); return JSON.stringify(o2); };
+    on('[data-oundo]', 'click', () => { const h = hist(M); if (!h.past.length) return; const prev = h.past.pop(); h.fut.push(JSON.parse(prev).P ? snapP() : snap(M)); restore(M, prev, p, ctx); re(); });
+    on('[data-oredo]', 'click', () => { const h = hist(M); if (!h.fut.length) return; const nx = h.fut.pop(); h.past.push(JSON.parse(nx).P ? snapP() : snap(M)); restore(M, nx, p, ctx); re(); });
+    // ✕ — всё к исходному: схема, полная потеря, частичный протез, виниры (формула пациента подтягивается заново)
+    on('[data-oclr]', 'click', () => {
+      const h = hist(M); h.past.push(snapP()); h.fut = [];
+      M.t = {}; M.links = {}; M.anchor = null; M.loaded = false;
+      if (ctx) ctx.reset(keysP());
+      re();
+    });
     on('[data-oxl]', 'click', (e) => {
       remember(M);
       const [t, k] = e.currentTarget.dataset.oxl.split('|'), x = get(M, t);

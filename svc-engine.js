@@ -598,7 +598,13 @@
     on('[data-fdel]', 'click', (e) => { const x = fill(e.currentTarget.dataset.fdel); if (x.list.length > 1) x.list.splice(x.i, 1); re(); });
     on('[data-fadd]', 'click', (e) => { const [k, t] = e.currentTarget.dataset.fadd.split('|'); const f = prOf(k).fields.find((x) => x.type === 'fillings');
       const list = SS.params[k][t][f.key]; if (list.length < (f.max || 3)) list.push({ mat: (f.materials[0] || {}).v, cls: '' }); re(); });
-    scnById(SS.scn).params.forEach((pr) => { const TY = (D.TYPES || {})[pr.type]; if (TY && TY.bind) TY.bind(P, pr, SS.params, re); });
+    // свои типы полей: reset(keys) — вернуть поля к умолчаниям (и снова считать автоматически), touch(keys) — отметить как заданные врачом
+    const tyCtx = {
+      reset: (keys) => { const sc = scnById(SS.scn); keys.forEach((k) => { const pr = sc.params.find((x) => x.key === k); if (!pr) return; delete SS.touched[k];
+        SS.params[k] = pr.default !== undefined ? clone(pr.default) : pr.type === 'toggle' ? false : pr.type === 'counter' ? (pr.min || 0) : pr.type === 'stock' ? {} : null; }); },
+      touch: (keys) => keys.forEach((k) => { SS.touched[k] = 1; }),
+    };
+    scnById(SS.scn).params.forEach((pr) => { const TY = (D.TYPES || {})[pr.type]; if (TY && TY.bind) TY.bind(P, pr, SS.params, re, tyCtx); });
     const add = P.querySelector('#svcadd'); if (add) add.onclick = () => doAdd(API);
     const undo = P.querySelector('#svcundo'); if (undo) undo.onclick = () => doUndo(API);
     const dia = P.querySelector('#svcdiary'); if (dia) dia.onclick = () => API.gotoDiary();

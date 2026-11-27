@@ -315,7 +315,7 @@
   .fdiff{margin-top:6px;font-size:12.5px} .fdr{display:flex;align-items:flex-start;gap:8px;padding:4px 0;border-bottom:1px dashed #e2e8f0} .fdr:last-child{border:0}
   .fdr .tchip{min-width:40px;text-align:center} .fdr>span:last-child{display:flex;flex-wrap:wrap;gap:4px 10px;padding-top:2px}
   .fon{color:#15803d;font-weight:600} .foff{color:#b91c1c}
-  `;
+  ` + Object.values(D.TYPES || {}).map((t) => t.css || '').join('');
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const badge = (lvl, t) => '<span class="badge ' + lvl + '"><span class="dot"></span>' + esc(t) + '</span>';
   const rub = (n) => (Math.round(n * 100) / 100).toLocaleString('ru-RU') + ' ₽';
@@ -433,6 +433,8 @@
   function renderParam(pr, API) {
     const p = SS.params, v = p[pr.key];
     if (pr.show && !pr.show(p)) return '';
+    const TY = (D.TYPES || {})[pr.type];
+    if (TY && TY.render) return TY.render(pr, p, { API, esc, badge });
     if (pr.type === 'teethPick') return renderTeeth(API, pr.label);
     if (pr.type === 'toothSet') return renderToothSet(pr, API);
     if (pr.type === 'stock') return renderStock(pr);
@@ -463,6 +465,12 @@
       Object.keys(L).forEach((l) => Object.keys((L[l] || {}).states || {}).forEach((k) => { if ((L[l].states[k] || {}).isActive) (out[t] = out[t] || []).push(l + ':' + k); })); });
     return out;
   }
+  // то же, но null, если формулы нет совсем (для ортопедии: «нет формулы» ≠ «все зубы здоровы»)
+  function fInfo(API) {
+    const comp = fComp(), pg = API.page && API.page();
+    const j = (comp && fJson(comp)) || (pg && pg.formula) || null;
+    return j && j.permanentTeeth && Object.keys(j.permanentTeeth).length ? fStates(API) : null;
+  }
   // подсказка сценария: зубы, подходящие по формуле, — пунктиром (только подсветка)
   function hintTeeth(API) {
     const sc = scnById(SS.scn); if (!sc || !sc.hint) return [];
@@ -484,6 +492,8 @@
   function render(API) {
     if (!SS) { const last = lsGet(); SS = fresh(scnById(last) ? last : SCENARIOS[0].id); }
     const sc = scnById(SS.scn);
+    // свои типы полей (ортопедия): один раз подтянуть формулу SQNS
+    if (sc) sc.params.forEach((pr) => { const TY = (D.TYPES || {})[pr.type]; if (TY && TY.prepare && TY.prepare(SS.params[pr.key], () => fInfo(API))) autoParams(SS); });
     let h = '';
     // выбор сценария: разделы → список шаблонов (подгруппы — sub)
     if (OPEN_CAT === undefined) OPEN_CAT = sc ? sc.cat : null;
@@ -588,6 +598,7 @@
     on('[data-fdel]', 'click', (e) => { const x = fill(e.currentTarget.dataset.fdel); if (x.list.length > 1) x.list.splice(x.i, 1); re(); });
     on('[data-fadd]', 'click', (e) => { const [k, t] = e.currentTarget.dataset.fadd.split('|'); const f = prOf(k).fields.find((x) => x.type === 'fillings');
       const list = SS.params[k][t][f.key]; if (list.length < (f.max || 3)) list.push({ mat: (f.materials[0] || {}).v, cls: '' }); re(); });
+    scnById(SS.scn).params.forEach((pr) => { const TY = (D.TYPES || {})[pr.type]; if (TY && TY.bind) TY.bind(P, pr, SS.params, re); });
     const add = P.querySelector('#svcadd'); if (add) add.onclick = () => doAdd(API);
     const undo = P.querySelector('#svcundo'); if (undo) undo.onclick = () => doUndo(API);
     const dia = P.querySelector('#svcdiary'); if (dia) dia.onclick = () => API.gotoDiary();

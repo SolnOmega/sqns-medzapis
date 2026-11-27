@@ -126,13 +126,13 @@
     const tt = (teeth, p) => (teethOf ? teethOf(teeth, p) : teeth);
     return [
       { key: 'anest', label: 'Анестезия', type: 'toggle', default: on },
-      { key: 'appl', label: 'Аппликационная', type: 'toggle', default: false },
+      { key: 'appl', label: 'Аппликационная', type: 'toggle', default: false, show: (p) => p.anest },
       { key: 'infil', label: 'Инфильтрационная', unit: 'карп.', type: 'counter', min: 0, max: 8, show: (p) => p.anest, auto: (teeth, p) => anestDefaults(tt(teeth, p)).infil },
       { key: 'cond', label: 'Проводниковая', unit: 'карп.', type: 'counter', min: 0, max: 8, show: (p) => p.anest, auto: (teeth, p) => anestDefaults(tt(teeth, p)).cond },
     ];
   };
   const anestLines = (p, L) => {
-    if (p.appl) L.push({ id: 13, qty: 1 });
+    if (p.anest && p.appl) L.push({ id: 13, qty: 1 });
     if (p.anest && +p.infil > 0) L.push({ id: 14, qty: +p.infil });
     if (p.anest && +p.cond > 0) L.push({ id: 15, qty: +p.cond });
   };

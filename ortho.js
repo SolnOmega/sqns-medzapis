@@ -127,20 +127,20 @@
   const TEMP_L = { mouth: 'временная в полости рта', lab: 'временная лаб.', post: 'временная со штифтом', pmma: 'временная PMMA', mp: 'временная металлопластмассовая', scr: 'временная винтовая', vmock: 'mockup', vlab: 'временный винир' };
   const TAKE = { st: 70, mk: 71, fib: 76, met: 77, core: 78 };
   const TAKE_L = { st: 'снять штампованную', mk: 'снять цельнолитую / МК', fib: 'удалить СВШ', met: 'удалить металл. штифт', core: 'удалить вкладку' };
-  const SUP_L = { tb: 'Ti-основание', mu: 'мультиюнит', zab: 'цирк. абатмент' };
+  const SUP_L = { tb: 'Ti-основание', mu: 'мультиюнит', zab: 'цирк. абатмент', ind: 'инд. абатмент' };
   const crownOpts = [o('zr', 'Цирконий'), o('zrc', 'Цирконий + керамика'), o('em', 'E-max'), o('mkp', 'МК с плечом'), o('mk', 'МК без плеча'), o('mklp', 'МК на ЛСП с плечом'), o('mkl', 'МК на ЛСП'), o('cl', 'Цельнолитая')];
   const BRUSHES = [
     { k: 'crown', l: 'Коронка', o: crownOpts },
     { k: 'bridge', l: 'Мост', o: crownOpts.filter((x) => x.v !== 'em') },
     { k: 'pont', l: 'Промежуточная', o: [o('zr', 'Цирконий'), o('zrc', 'Цирконий + керамика'), o('mk', 'МК'), o('mkl', 'МК на ЛСП'), o('cl', 'Цельнолитая'), o('adh', 'Адгезивный стекловолоконный')] },
-    { k: 'core', l: 'Вкладка', o: [o('razb', 'Разборная'), o('nrz', 'Неразборная (лаб.)'), o('mouth', 'В полости рта'), o('svsh', 'Композит на СВШ'), o('zr', 'Цирконий'), o('gold', 'Драгметалл')] },
+    { k: 'core', l: 'Вкладка', o: [o('svsh', 'Композит на СВШ'), o('mouth', 'В полости рта'), o('nrz', 'Неразборная (лаб.)'), o('razb', 'Разборная'), o('zr', 'Цирконий'), o('gold', 'Драгметалл')] },
     { k: 'ven', l: 'Винир / вкладка', o: [o('ven', 'Винир керамический'), o('inl', 'Вкладка керамическая')] },
-    { k: 'temp', l: 'Временная', o: [o('mouth', 'Пластмасса (в полости рта)'), o('lab', 'Пластмасса (лаб.)'), o('pmma', 'PMMA'), o('mp', 'Металлопластмасса'), o('post', 'Со штифтом'), o('scr', 'Винтовая (имплантат)'), o('vmock', 'Винир — mockup'), o('vlab', 'Винир (лаб.)')] },
-    { k: 'impl', l: 'Имплантат', o: [o('tb', 'Ti-основание'), o('mu', 'Мультиюнит'), o('zab', 'Цирк. абатмент (вклеиваемая)')] },
+    { k: 'temp', l: 'Временная', o: [o('lab', 'Пластмасса (лаб.)'), o('mouth', 'Пластмасса (в полости рта)'), o('pmma', 'PMMA'), o('mp', 'Металлопластмасса'), o('post', 'Со штифтом'), o('scr', 'Винтовая (имплантат)'), o('vlab', 'Винир временный (лаб.)')] },
+    { k: 'icrown', l: 'На имплантате', o: [o('zr|tb', 'Цирконий (Ti-основание)'), o('zr|mu', 'Цирконий (мультиюнит)'), o('zr|zab', 'Цирконий (вклеиваемая)'), o('mk|ind', 'МК (инд. абатмент)')] },
     { k: 'take', l: 'Снять', o: [o('mk', 'Коронку цельнолитую / МК'), o('st', 'Коронку штампованную'), o('core', 'Культевую вкладку'), o('fib', 'Штифт СВШ'), o('met', 'Штифт металлический')] },
     { k: 'gum', l: 'Керам. десна', o: [o('on', '1 ед. на зуб')] },
-    { k: 'rem', l: 'Зуб в протезе', o: [o('on', 'Замещаемый зуб')], show: (p) => !!p.part },
-    { k: 'erase', l: 'Ластик', o: [o('all', 'Всё на зубе'), o('perm', 'Постоянную'), o('temp', 'Временную'), o('core', 'Вкладку'), o('take', '«Снять»'), o('impl', 'Имплантат')] },
+    { k: 'rem', l: 'Зуб в протезе', o: [o('on', 'Частичный съёмный')] },
+    { k: 'erase', l: 'Ластик', o: [o('all', 'Очистить зуб')], icon: true },
   ];
 
   /* ---------------- зубы, челюсти, соседи ---------------- */
@@ -177,17 +177,17 @@
   function cleanLinks(M) {
     Object.keys(M.links).forEach((k) => { const [a, b] = k.split('-'); if (!M.links[k] || !hasFix(peek(M, a)) || !hasFix(peek(M, b))) delete M.links[k]; });
   }
-  const implTeeth = (M, J) => SEQ[J].filter((t) => peek(M, t).root === 'impl');
-  const remTeeth = (M, J) => SEQ[J].filter((t) => peek(M, t).rem);
+  const implTeeth = (M, J) => SEQ[J].filter((t) => peek(M, t).root === 'impl').sort();
+  const remTeeth = (M, J) => SEQ[J].filter((t) => peek(M, t).rem).sort();
   // мост на имплантатах: хотя бы одна опора — имплантат
   const implBridge = (M, ch) => !!ch && ch.abut.some((a) => peek(M, a).root === 'impl');
 
   /* ---------------- кисти: изменение формулы ---------------- */
   function paint(M, t, k, v, p) {
     const x = get(M, t), J = jawOf(t);
-    if (lossOn(p, J) && !['impl', 'take', 'erase'].includes(k)) return 'На ' + JAW_N[J] + ' включена полная потеря зубов — там работают только «Имплантат», «Снять» и «Ластик»';
+    if (lossOn(p, J) && !['icrown', 'take', 'erase'].includes(k)) return 'На ' + JAW_N[J] + ' включена полная потеря зубов — там работают только «На имплантате» (отметить имплантат), «Снять» и «Ластик»';
     if (k !== 'bridge') M.anchor = null;
-    if (k === 'crown') { x.perm = { k: 'crown', m: v }; delete x.rem; if (x.root === 'none') x.root = 'nat'; }
+    if (k === 'crown') { x.perm = { k: 'crown', m: v }; delete x.rem; if (x.root === 'none') x.root = 'nat'; if (x.root === 'impl') x.sup = (MAT[v] || {}).g === 'mk' ? 'ind' : (x.sup && x.sup !== 'ind' ? x.sup : 'tb'); }
     if (k === 'pont') {
       x.perm = { k: 'pont', m: v }; delete x.rem; delete x.core; delete x.sup;
       if (x.root !== 'none') x.root = 'none';
@@ -210,20 +210,29 @@
     if (k === 'core') { if (x.root === 'impl') return 'На имплантат вкладка не ставится'; x.core = v; if (x.root === 'none') x.root = 'nat'; if (x.perm && x.perm.k === 'pont') delete x.perm; }
     if (k === 'ven') { x.perm = { k: v, m: 'em' }; delete x.rem; if (x.root === 'none') x.root = 'nat'; }
     if (k === 'temp') x.temp = x.temp === v ? null : v;
-    if (k === 'impl') {
-      if (x.root === 'impl' && x.sup === v) { x.root = 'none'; delete x.sup; delete x.uImpl; }
-      else { x.root = 'impl'; x.sup = v; x.uImpl = true; delete x.core; delete x.rem; if (x.perm && x.perm.k !== 'crown') x.perm.k === 'pont' ? (x.perm.k = 'crown') : delete x.perm; }
+    // коронка на имплантате: имплантат подразумевается (стоит или будет); на челюсти с полной потерей — только отметить имплантат
+    if (k === 'icrown') {
+      const [m, sup] = v.split('|');
+      if (lossOn(p, J)) {
+        if (x.root === 'impl') { if (x.uImpl) { x.root = 'none'; delete x.sup; delete x.uImpl; } else return 'Имплантат ' + fmt(t) + ' есть в формуле пациента'; }
+        else { x.root = 'impl'; x.sup = sup; x.uImpl = true; }
+      } else if (x.root === 'impl' && x.perm && x.perm.k === 'crown' && x.perm.m === m && x.sup === sup) {
+        delete x.perm; if (x.uImpl) { x.root = 'none'; delete x.sup; delete x.uImpl; }
+      } else {
+        if (x.root !== 'impl') x.uImpl = true;
+        x.root = 'impl'; x.sup = sup; x.perm = { k: 'crown', m }; delete x.core; delete x.rem; delete x.gum;
+      }
     }
     if (k === 'take') { const a = x.take || []; x.take = a.includes(v) ? a.filter((y) => y !== v) : a.concat(v); }
     if (k === 'gum') x.gum = !x.gum;
     if (k === 'rem') { x.rem = !x.rem; if (x.rem) { delete x.perm; delete x.temp; delete x.core; delete x.gum; if (x.root === 'nat') x.root = 'none'; } }
-    if (k === 'erase') eraseLayer(x, v);
+    if (k === 'erase') { eraseLayer(x, 'all'); eraseLayer(x, 'impl'); }
     cleanLinks(M);
     return '';
   }
   function eraseLayer(x, v) {
     if (v === 'all') { ['perm', 'temp', 'core', 'take', 'gum', 'rem'].forEach((y) => delete x[y]); }
-    else if (v === 'impl') { if (x.root === 'impl') { x.root = 'none'; delete x.sup; delete x.uImpl; } }
+    else if (v === 'impl') { if (x.root === 'impl' && x.uImpl) { x.root = x.known ? 'nat' : 'none'; delete x.sup; delete x.uImpl; } }
     else delete x[v];
   }
 
@@ -255,6 +264,8 @@
   const autoLoss = (p, J) => { const M = p.omap; return !!(M && M.loaded && !M.noF && SEQ[J].every((t) => { const x = peek(M, t); return x.known && x.root !== 'nat'; })); };
 
   /* ---------------- расчёт услуг ---------------- */
+  // виниры на формуле (для Wax-up и mockup под формулой)
+  const venTeeth = (p) => { const M = p.omap; return M ? Object.keys(M.t).filter((t) => !lossOn(p, jawOf(t)) && (M.t[t].perm || {}).k === 'ven').sort() : []; };
   // зубы, которые препарируем (для анестезии по умолчанию)
   const prepTeeth = (p) => { const M = p.omap; if (!M) return []; return Object.keys(M.t).filter((t) => { const x = M.t[t]; return !lossOn(p, jawOf(t)) && x.root === 'nat' && x.perm && x.perm.k !== 'pont'; }).sort(); };
   // проблемы и строки по зубам: add(id, зуб)
@@ -294,7 +305,6 @@
         else add(TEMP_T[v], t);
       }
       if (x.gum) add(105, t);
-      if (x.rem && !p.part) out.push({ lvl: 'warn', text: Z + 'отмечен как зуб в протезе, но «Частичный съёмный протез» выключен' });
     });
   }
   const ORDER = [70, 71, 76, 77, 78, 95, 96, 97, 98, 99, 240, 85, 86, 87, 89, 90, 91, 92, 93, 94, 129, 130, 131, 132,
@@ -311,23 +321,27 @@
   function build(p) {
     const L = [], M = p.omap || { t: {}, links: {} };
     [[6, 'v1p'], [7, 'v1pp'], [8, 'v2']].forEach(([id, k]) => { if (+p[k] > 0) L.push({ id, qty: +p[k] }); });
-    if (p.iso) L.push({ id: p.iso === 'dam' ? 10 : 9, qty: 1 });
-    if (p.appl) L.push({ id: 13, qty: 1 });
+    [9, 10].forEach((id) => { if (+(p.isoS || {})[id] > 0) L.push({ id, qty: +p.isoS[id] }); });
+    if (p.anest && p.appl) L.push({ id: 13, qty: 1 });
     if (p.anest && +p.infil > 0) L.push({ id: 14, qty: +p.infil });
     if (p.anest && +p.cond > 0) L.push({ id: 15, qty: +p.cond });
-    [[79, 'alg'], [80, 'sil'], [81, 'scan'], [82, 'model'], [83, 'waxT'], [84, 'waxJ'], [11, 'retr'], [12, 'retr2']].forEach(([id, k]) => { if (+p[k] > 0) L.push({ id, qty: +p[k] }); });
+    const vt = venTeeth(p), vq = (n) => (n === vt.length ? vt : undefined);
+    if (vt.length && p.vwax && +p.waxV > 0) L.push({ id: 83, qty: +p.waxV, teeth: vq(+p.waxV) });
+    if (vt.length && p.vmock && +p.mockN > 0) L.push({ id: 93, qty: +p.mockN, teeth: vq(+p.mockN) });
+    [[79, 'alg'], [80, 'sil'], [81, 'scan'], [82, 'model'], [83, vt.length ? '' : 'waxT'], [84, 'waxJ'], [11, 'retr'], [12, 'retr2']].forEach(([id, k]) => { if (k && +p[k] > 0) L.push({ id, qty: +p[k] }); });
     const map = {};
     toothWork(p, (id, t) => { if (!id) return; (map[id] = map[id] || []).push(t); }, []);
     Object.keys(map).map(Number).sort((a, b) => ORDER.indexOf(a) - ORDER.indexOf(b)).forEach((id) => { const tt = [...new Set(map[id])].sort(); L.push({ id, qty: map[id].length, teeth: tt }); });
     // частичный съёмный — по челюстям
-    if (p.part) ['U', 'L'].forEach((J) => {
+    ['U', 'L'].forEach((J) => {
       if (lossOn(p, J)) return;
       const tt = remTeeth(M, J); if (!tt.length) return;
       const id = partLine(p, J, tt); if (id) L.push({ id, qty: 1, teeth: tt });
-      if (p['parm' + J]) L.push({ id: 159, qty: 1 });
-      if (p['pbase' + J]) L.push({ id: 160, qty: 1 });
-      if (+p['plk' + J] > 0) L.push({ id: 169, qty: +p['plk' + J] });
-      if (+p['plk2' + J] > 0) L.push({ id: 170, qty: +p['plk2' + J] });
+      const k = p['pk' + J];
+      if (p['parm' + J] && (k === 'plast' || k === 'imm')) L.push({ id: 159, qty: 1 });
+      if (p['pbase' + J] && k === 'plast') L.push({ id: 160, qty: 1 });
+      if (k === 'bug' && +p['plk' + J] > 0) L.push({ id: 169, qty: +p['plk' + J] });
+      if (k === 'bug' && +p['plk2' + J] > 0) L.push({ id: 170, qty: +p['plk2' + J] });
     });
     // полная потеря — по челюстям
     ['U', 'L'].forEach((J) => {
@@ -354,6 +368,7 @@
     const out = [], M = p.omap || { t: {}, links: {} };
     toothWork(p, () => {}, out);
     if (p.anest && !(+p.infil + +p.cond)) out.push({ lvl: 'warn', text: 'Анестезия включена, но карпул 0' });
+    if (p.imp && !(+p.alg + +p.sil + +p.scan)) out.push({ lvl: 'warn', text: 'Оттиски: не указано ни одного оттиска или скана' });
     if (M.anchor) out.push({ lvl: 'warn', text: 'Мост: отметьте вторую крайнюю опору (первая — ' + fmt(M.anchor) + ')' });
     ['U', 'L'].forEach((J) => {
       const N = JAW_N[J] + ': ', it = implTeeth(M, J);
@@ -365,15 +380,46 @@
         if ((k === 'rem' || k === 'fix') && !it.length) out.push({ lvl: k === 'rem' && p['lr' + J] === 'ball' ? 'bad' : 'warn', text: N + 'отметьте имплантаты на формуле кистью «Имплантат»' });
         const lb = p['lb' + J];
         if (lb && it.length && ((k === 'rem' && p['lr' + J] === 'bar') || (k === 'fix' && p['lbar' + J])) && +lb !== it.length) out.push({ lvl: 'warn', text: N + 'балка на ' + lb + ' имплантатах, а отмечено ' + it.length });
-      } else if (p.part && !remTeeth(M, J).length && J === 'L' && !remTeeth(M, 'U').length) out.push({ lvl: 'warn', text: 'Частичный съёмный протез: отметьте замещаемые зубы кистью «Зуб в протезе»' });
+      }
     });
     return out;
   }
 
+  /* ---------------- запись в зубную формулу SQNS ---------------- */
+  // Формат op — как в services.js (FX): { t, set: [[участок, состояние]], clear: [[участок, состояние]], wipe }.
+  // Коронка на имплантате — как клик «Имплантация» в SQNS: все 4 участка имплантации + «удалён».
+  const IMPL_SET = ['implantationSurface', 'implantationCrown', 'implantationImplant', 'implantationAbutment'].map((l) => [l, 'dental_implantation']).concat([['default', 'removed'], ['crown', 'removed']]);
+  const CAR = [/^(crown|surface)/, /caries/];
+  function formula(p) {
+    const M = p.omap, ops = []; if (!M) return ops;
+    Object.keys(M.t).sort().forEach((t) => {
+      const x = M.t[t], J = jawOf(t), pm = x.perm, op = (o2) => ops.push(Object.assign({ t }, o2));
+      (x.take || []).forEach((v) => {
+        if (v === 'st' || v === 'mk') op({ clear: [['crown', 'artificial_crown']] });
+        if (v === 'core') op({ clear: [['crown', 'stump_crown']] });
+        if (v === 'fib' || v === 'met') op({ clear: [[/^canal/, /^(post|fiber_post|metal_post)$/], [/^root/, 'post']] });
+      });
+      if (lossOn(p, J)) {
+        if (x.root === 'impl') { if (x.uImpl) op({ wipe: true, set: IMPL_SET }); return; }
+        const k = p['lk' + J];
+        if (k) op({ set: [['crown', k === 'fix' ? 'construct_unremovable' : 'construct_removable']] });
+        return;
+      }
+      if (x.rem) { op({ set: [['crown', 'construct_removable']] }); return; }
+      if (x.root === 'impl' && (pm && pm.k === 'crown' || x.temp || x.uImpl)) op({ wipe: !!x.uImpl, set: IMPL_SET });
+      if (x.core) op({ set: [['crown', 'stump_crown']] });
+      if (pm && pm.k === 'crown' && x.root !== 'impl') op({ clear: [['default', 'removed'], ['crown', 'removed'], ['crown', 'temporary_crown'], ['crown', 'bridge_intermediate'], CAR], set: [['crown', 'artificial_crown']] });
+      else if (pm && pm.k === 'pont') op({ clear: [['crown', 'artificial_crown'], ['crown', 'temporary_crown']], set: [['crown', 'bridge_intermediate']] });
+      else if (pm && (pm.k === 'ven' || pm.k === 'inl')) op({ clear: [CAR], set: [['crown', 'indirect_restoration']] });
+      else if (!pm && x.temp && x.root !== 'impl') op({ clear: [['default', 'removed'], ['crown', 'removed']], set: [['crown', 'temporary_crown']] });
+    });
+    return ops;
+  }
+
   /* ---------------- рисунок ---------------- */
   const COL = {
-    nat: ['#ffffff', '#cbd5e1'], zr: ['#f6e6bd', '#c49a45'], em: ['#fbfdff', '#6b7c99'], mk: ['#f7f1e6', '#a8a29e'],
-    metal: ['#6b7280', '#374151'], comp: ['#e2b47a', '#a8763a'], ex: ['#e5e7eb', '#9ca3af'], impl: ['#cbd5e1', '#64748b'],
+    nat: ['#ffffff', '#cbd5e1'], zr: ['#ecd194', '#ad8532'], em: ['#fcf5e2', '#cfb57a'], mk: ['#f7f1e6', '#a8a29e'],
+    metal: ['#6b7280', '#374151'], comp: ['#d49558', '#97602c'], ex: ['#e5e7eb', '#9ca3af'], impl: ['#cbd5e1', '#64748b'],
     base: ['#fbcfe0', '#e879a6'], gum: '#f4a7b9', temp: '#475569', red: '#dc2626', ac: ['#ffffff', '#94a3b8'],
   };
   const SUP_C = { tb: '#94a3b8', mu: '#475569', zab: COL.zr[0] };
@@ -414,8 +460,8 @@
         const g = (MAT[pm.m] || {}).g || 'zr', c = COL[g] || COL.zr, pnt = pm.k === 'pont';
         h += pnt ? rect(3, 10, 24, 26, 11, c) + (g === 'mk' ? metalLayer(14, 18) : '') : rect(3, 6, 24, 34, 7, c) + (g === 'mk' ? metalLayer(10, 27) : '');
       }
-      if (pm && pm.k === 'ven') h += rect(3, 6, 24, 10, 4, COL.em);
-      if (pm && pm.k === 'inl') h += rect(10, 10, 10, 13, 2.5, COL.em);
+      if (pm && pm.k === 'ven') h += rect(3, 5, 24, 16, 5, COL.em);
+      if (pm && pm.k === 'inl') h += rect(9, 9, 12, 15, 3, COL.em);
       if (x.core) h += rect(13.5, 40, 3, 30, 1.5, COL[CORE_G[x.core]]) + rect(9, 20, 12, 22, 3, COL[CORE_G[x.core]]);
       if (x.gum) h += '<rect x="3" y="37" width="24" height="6" rx="3" fill="' + COL.gum + '"/>';
       if (x.temp) h += '<rect x="1" y="2" width="28" height="42" rx="8" fill="none" stroke="' + COL.temp + '" stroke-width="1.5" stroke-dasharray="3.5 2.5"/>';
@@ -463,6 +509,13 @@
   const saveBR = () => { try { localStorage.setItem(LSK, JSON.stringify(BR)); } catch (e) { /* */ } };
   const selOf = (b) => (b.o.some((x) => x.v === BR.sel[b.k]) ? BR.sel[b.k] : b.o[0].v);
   let MSG = '';
+  // история действий на формуле (отменить / вернуть); сбрасывается при новом сценарии
+  let H = { ref: null, past: [], fut: [] };
+  const hist = (M) => { if (H.ref !== M) H = { ref: M, past: [], fut: [] }; return H; };
+  const snap = (M) => JSON.stringify({ t: M.t, links: M.links });
+  const restore = (M, s) => { const o2 = JSON.parse(s); M.t = o2.t; M.links = o2.links; M.anchor = null; };
+  const remember = (M) => { const h = hist(M); h.past.push(snap(M)); if (h.past.length > 60) h.past.shift(); h.fut = []; };
+  const ERASER = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#475569" stroke-width="1.8" stroke-linejoin="round"><path d="M3.5 14.5 13 5a2 2 0 0 1 2.8 0l3.7 3.7a2 2 0 0 1 0 2.8L11 20H7.5z" fill="#fbcfe0"/><path d="M8 10l6.5 6.5"/><path d="M11 20h9.5"/></svg>';
 
   function layers(M, t, p) {
     const x = peek(M, t), out = [], J = jawOf(t);
@@ -492,7 +545,7 @@
       if (lossOn(p, J)) {
         const it = implTeeth(M, J);
         h += '<div class="osb"><b>' + JAW_N[J] + ': полная потеря зубов</b>' + (it.length ? '<br><span>имплантаты ' + fmtL(it) + '</span>' : '') + '</div>';
-      } else if (p.part && remTeeth(M, J).length) h += '<div class="osb"><b>' + JAW_N[J] + ': частичный съёмный протез</b><br><span>замещает ' + fmtL(remTeeth(M, J)) + '</span></div>';
+      } else if (remTeeth(M, J).length) h += '<div class="osb"><b>' + JAW_N[J] + ': частичный съёмный протез</b><br><span>замещает ' + fmtL(remTeeth(M, J)) + '</span></div>';
     });
     const rows = Object.keys(M.t).sort().map((t) => {
       const ls = layers(M, t, p); if (!ls.length) return '';
@@ -505,10 +558,14 @@
     const { esc, badge } = ctx, M = p.omap;
     const brushes = BRUSHES.filter((b) => !b.show || b.show(p));
     if (!brushes.some((b) => b.k === BR.act)) BR.act = 'crown';
+    const hs = hist(M);
     const pal = '<div class="opal">' + brushes.map((b) => {
-      const v = selOf(b);
-      return '<div class="obr' + (b.k === BR.act ? ' on' : '') + '" data-obr="' + b.k + '"><b>' + esc(b.l) + '</b>' + (b.o.length > 1 ? '<select data-obs="' + b.k + '">' + b.o.map((x) => '<option value="' + x.v + '"' + (x.v === v ? ' selected' : '') + '>' + esc(x.l) + '</option>').join('') + '</select>' : '<span class="obs1">' + esc(b.o[0].l) + '</span>') + '</div>';
-    }).join('') + '</div>';
+      const v = selOf(b), on = b.k === BR.act ? ' on' : '';
+      if (b.icon) return '<div class="obr oer' + on + '" data-obr="' + b.k + '" title="Ластик — очистить всё на зубе">' + ERASER + '<b>' + esc(b.l) + '</b></div>';
+      return '<div class="obr' + on + '" data-obr="' + b.k + '"><b>' + esc(b.l) + '</b>' + (b.o.length > 1 ? '<select data-obs="' + b.k + '">' + b.o.map((x) => '<option value="' + x.v + '"' + (x.v === v ? ' selected' : '') + '>' + esc(x.l) + '</option>').join('') + '</select>' : '<span class="obs1">' + esc(b.o[0].l) + '</span>') + '</div>';
+    }).join('') +
+      '<div class="ohist"><button data-oundo="1" title="Отменить действие"' + (hs.past.length ? '' : ' disabled') + '>↶</button><button data-oredo="1" title="Вернуть действие"' + (hs.fut.length ? '' : ' disabled') + '>↷</button>' +
+      '<button class="oclr" data-oclr="1" title="Сбросить всё на формуле">✕</button></div></div>';
     const fromH = '<div class="row" style="grid-template-columns:1fr auto;margin:0 0 8px"><label>Взять из формулы пациента' + (M.fromF && M.noF ? '<br><span class="auto" style="color:#b45309">формула на странице не найдена</span>' : M.fromF && M.loaded ? '<br><span class="auto">● имплантаты, отсутствующие зубы, конструкции (серым)</span>' : '') + '</label><div><button class="tg ' + (M.fromF ? 'on' : '') + '" data-ofrom="1"></button></div></div>';
     const hint = M.anchor ? '<div class="ohint">Мост от ' + fmt(M.anchor) + ': нажмите последнюю опору · <button class="link" data-oanc="1">отмена</button></div>'
       : BR.act === 'bridge' ? '<div class="ohint">Мост: нажмите первую и последнюю опору — между ними станут промежуточные</div>'
@@ -531,11 +588,17 @@
     });
     on('[data-obs]', 'change', (e) => { const k = e.currentTarget.dataset.obs; BR.sel[k] = e.currentTarget.value; BR.act = k; saveBR(); re(); });
     on('[data-ot]', 'click', (e) => {
-      const t = e.currentTarget.dataset.ot, b = BRUSHES.find((x) => x.k === BR.act);
-      MSG = paint(M, t, BR.act, selOf(b), p) || ''; re();
+      const t = e.currentTarget.dataset.ot, b = BRUSHES.find((x) => x.k === BR.act), before = snap(M);
+      MSG = paint(M, t, BR.act, selOf(b), p) || '';
+      if (snap(M) !== before) { const h = hist(M); h.past.push(before); if (h.past.length > 60) h.past.shift(); h.fut = []; }
+      re();
     });
-    on('[data-olk]', 'click', (e) => { e.stopPropagation(); const k = e.currentTarget.dataset.olk; M.links[k] = !M.links[k]; cleanLinks(M); re(); });
+    on('[data-olk]', 'click', (e) => { e.stopPropagation(); remember(M); const k = e.currentTarget.dataset.olk; M.links[k] = !M.links[k]; cleanLinks(M); re(); });
+    on('[data-oundo]', 'click', () => { const h = hist(M); if (!h.past.length) return; h.fut.push(snap(M)); restore(M, h.past.pop()); re(); });
+    on('[data-oredo]', 'click', () => { const h = hist(M); if (!h.fut.length) return; h.past.push(snap(M)); restore(M, h.fut.pop()); re(); });
+    on('[data-oclr]', 'click', () => { remember(M); M.t = {}; M.links = {}; M.anchor = null; M.loaded = false; re(); });
     on('[data-oxl]', 'click', (e) => {
+      remember(M);
       const [t, k] = e.currentTarget.dataset.oxl.split('|'), x = get(M, t);
       if (k.startsWith('take:')) { const v = k.slice(5); x.take = (x.take || []).filter((y) => y !== v); }
       else eraseLayer(x, k);
@@ -558,6 +621,10 @@
   .obr:hover{border-color:#a5b4fc} .obr.on{border-color:#6366f1;background:#eef2ff;box-shadow:0 0 0 2px rgba(99,102,241,.15)}
   .obr b{display:block;font-size:12px;color:#334155;margin-bottom:3px} .obr.on b{color:#3730a3}
   .obr select{width:100%;padding:3px 4px;font-size:11.5px;border-radius:7px} .obs1{font-size:11px;color:#64748b}
+  .oer{display:flex;align-items:center;gap:6px} .oer b{margin:0}
+  .ohist{display:flex;gap:4px} .ohist button{flex:1;border:1.5px solid #e2e8f0;border-radius:10px;background:#fff;font-size:18px;font-weight:700;color:#334155;cursor:pointer}
+  .ohist button:hover:not(:disabled){border-color:#a5b4fc;color:#3730a3} .ohist button:disabled{opacity:.35;cursor:default}
+  .ohist .oclr{color:#b91c1c;font-size:15px} .ohist .oclr:hover{border-color:#fca5a5!important;color:#b91c1c!important;background:#fef2f2}
   .ohint{font-size:11.5px;color:#4338ca;background:#eef2ff;border-radius:8px;padding:5px 8px;margin:2px 0 6px}
   .omap{display:block;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;user-select:none}
   .omap .ot{cursor:pointer} .omap .otb{fill:transparent} .omap .ot:hover .otb{fill:#eef2ff} .omap .ot.anc .otb{fill:#c7d2fe}
@@ -570,8 +637,8 @@
   .osr .tchip{min-width:40px;text-align:center} .osl{display:flex;flex-wrap:wrap;gap:4px}
   .osp{display:inline-flex;align-items:center;gap:3px;border-radius:8px;padding:2px 3px 2px 7px;font-size:11.5px;background:#f1f5f9;color:#334155;border:1px solid #e2e8f0}
   .osp button{border:0;background:transparent;color:#94a3b8;cursor:pointer;font-size:13px;line-height:1;padding:0 3px} .osp button:hover{color:#b91c1c}
-  .osp.g-zr{background:#fbf3dc;border-color:#e7cf96} .osp.g-em{background:#fff;border-color:#b6c2d6} .osp.g-mk{background:#f5efe4;border-color:#cfc6b8}
-  .osp.g-metal{background:#e5e7eb;border-color:#9ca3af} .osp.g-comp{background:#f6e3c6;border-color:#d4a86a} .osp.g-tp{border-style:dashed;border-color:#64748b;background:#fff}
+  .osp.g-zr{background:#f5e3b8;border-color:#d4b064} .osp.g-em{background:#fdf8ea;border-color:#e3cf9e} .osp.g-mk{background:#f5efe4;border-color:#cfc6b8}
+  .osp.g-metal{background:#e5e7eb;border-color:#9ca3af} .osp.g-comp{background:#f0d2b0;border-color:#c38a50} .osp.g-tp{border-style:dashed;border-color:#64748b;background:#fff}
   .osp.g-tk{background:#fef2f2;border-color:#fecaca;color:#991b1b} .osp.g-im{background:#e2e8f0;border-color:#94a3b8} .osp.g-rm,.osp.g-gm{background:#fdebf2;border-color:#f0a8c4}
   `;
 
@@ -603,9 +670,9 @@
     ];
   };
   const PART = (J) => {
-    const has = (p) => !!(p.omap && remTeeth(p.omap, J).length) && !p['loss' + J], kind = (p) => p['pk' + J], g = { grp: 'part' };
+    const has = (p) => !!(p.omap && remTeeth(p.omap, J).length) && !p['loss' + J], kind = (p) => p['pk' + J], g = {};
     return [
-      seg('pk' + J, JAW_N[J] + ' — вид протеза', [o('plast', 'Пластиночный'), o('imm', 'Иммедиат'), o('nylon', 'Нейлон. кламмеры'), o('thermo', 'Термопласт'), o('bug', 'Бюгельный')], 'plast', has, Object.assign({ wide: true }, g)),
+      seg('pk' + J, 'Частичный съёмный протез — ' + JAW_N[J], [o('plast', 'Пластиночный'), o('bug', 'Бюгельный'), o('imm', 'Иммедиат'), o('nylon', 'Нейлон. кламмеры'), o('thermo', 'Термопласт')], 'plast', has, Object.assign({ wide: true }, g)),
       seg('pb' + J, 'Бюгельный', [o('161', 'Литые кламмеры'), o('162', '+ литой базис'), o('163', 'На ЛСП'), o('164', 'Нейлон. кламмеры'), o('165', 'Термопласт. базис'), o('166', 'Шинирующий'), o('167', 'С замками'), o('168', 'С замками, ЛСП')], '161', (p) => has(p) && kind(p) === 'bug', Object.assign({ wide: true, sub: true }, g)),
       Object.assign({ key: 'parm' + J, label: 'Армирование', type: 'toggle', default: false, sub: true, show: (p) => has(p) && (kind(p) === 'plast' || kind(p) === 'imm') }, g),
       Object.assign({ key: 'pbase' + J, label: 'Литой металлический базис', type: 'toggle', default: false, sub: true, show: (p) => has(p) && kind(p) === 'plast' }, g),
@@ -618,27 +685,31 @@
   SCENARIOS.push({
     id: 'ortho', title: 'Ортопедия', icon: '👑', cat: 'ortho',
     params: [
-      cnt('v1p', 'Приём первичный', '', 0, { max: 5 }),
+      cnt('v1p', 'Приём первичный', '', 1, { max: 5 }),
       cnt('v1pp', 'Первичный с планом лечения', '', 0, { max: 5 }),
-      cnt('v2', 'Приём повторный', '', 1, { max: 20 }),
-      { key: 'iso', label: 'Изоляция', type: 'opt', options: [o('optra', 'OptraGate'), o('dam', 'Коффердам')], default: null, onDefault: 'optra' },
+      cnt('v2', 'Приём повторный', '', 0, { max: 20 }),
+      { key: 'isoS', label: 'Изоляция', type: 'stock', rows: [{ l: 'Изоляция', items: [{ id: 9, l: 'OptraGate' }, { id: 10, l: 'Коффердам' }] }], optional: true },
       ...ANEST,
-      { key: 'imp', label: 'Оттиски и модели', type: 'group', default: false },
+      { key: 'imp', label: 'Оттиски', type: 'group', default: true },
       cnt('alg', 'Альгинатный', 'чел.', 0, { grp: 'imp' }),
       cnt('sil', 'Силиконовый', 'чел.', 0, { grp: 'imp' }),
       cnt('scan', '3D-скан', 'чел.', 0, { grp: 'imp' }),
-      cnt('model', 'Контрольная модель', 'шт.', 0, { grp: 'imp' }),
-      cnt('waxT', 'Wax-up', 'зуб.', 0, { grp: 'imp' }),
-      cnt('waxJ', 'Wax-up / 3D-печать', 'чел.', 0, { grp: 'imp' }),
       ...LOSS('U'), ...LOSS('L'),
       { key: 'omap', label: 'Конструкции', type: 'orthoMap', default: { t: {}, links: {}, fromF: true, loaded: false, anchor: null } },
-      { key: 'part', label: 'Частичный съёмный протез', type: 'group', default: false, summary: (p) => ['U', 'L'].filter((J) => p.omap && remTeeth(p.omap, J).length && !p['loss' + J]).map((J) => JAW_N[J]).join(', ') || 'кисть «Зуб в протезе»' },
       ...PART('U'), ...PART('L'),
-      { key: 'retrG', label: 'Ещё: ретракция десны', type: 'group', default: false },
-      cnt('retr', 'Ретракция', 'зуб.', 0, { grp: 'retrG' }),
-      cnt('retr2', 'Двойная ретракция', 'зуб.', 0, { grp: 'retrG' }),
+      // виниры: Wax-up и mockup под формулой, по числу виниров (можно выключить или поправить)
+      { key: 'vwax', label: 'Wax-up под виниры', type: 'toggle', default: true, show: (p) => venTeeth(p).length > 0 },
+      cnt('waxV', 'Wax-up', 'зуб.', 0, { sub: true, show: (p) => venTeeth(p).length > 0 && p.vwax, auto: (teeth, p) => venTeeth(p).length }),
+      { key: 'vmock', label: 'Mockup под виниры', type: 'toggle', default: true, show: (p) => venTeeth(p).length > 0 },
+      cnt('mockN', 'Mockup', 'зуб.', 0, { sub: true, show: (p) => venTeeth(p).length > 0 && p.vmock, auto: (teeth, p) => venTeeth(p).length }),
+      { key: 'more', label: 'Ещё: модели, Wax-up, ретракция', type: 'group', default: false },
+      cnt('model', 'Контрольная модель', 'шт.', 0, { grp: 'more' }),
+      cnt('waxT', 'Wax-up', 'зуб.', 0, { grp: 'more', show: (p) => !venTeeth(p).length }),
+      cnt('waxJ', 'Wax-up / 3D-печать', 'чел.', 0, { grp: 'more' }),
+      cnt('retr', 'Ретракция', 'зуб.', 0, { grp: 'more' }),
+      cnt('retr2', 'Двойная ретракция', 'зуб.', 0, { grp: 'more' }),
     ],
-    check, build,
+    check, build, formula,
   });
   const oc = (D.CATS || []).find((c) => c.id === 'ortho'); if (oc) delete oc.empty;
 

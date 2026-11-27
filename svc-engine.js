@@ -418,7 +418,7 @@
       return '<span class="stk' + (n ? ' on' : '') + '"><button data-sstk="' + a + '">' + esc(it.l) + (n ? ' <b>×' + n + '</b>' : '') + '</button>' + (n ? '<button class="m" data-sstkm="' + a + '" title="Убрать одну">−</button>' : '') + '</span>';
     }).join('') + '</div></div>').join('');
     return '<div class="stock">' + rows + (pr.total && total ? '<div class="stkt">Итого: ' + String(+total.toFixed(1)).replace('.', ',') + ' ' + esc(pr.unit || '') + '</div>' : '') +
-      (!any ? '<div>' + badge('bad', pr.needText || 'выберите') + '</div>' : '') + '</div>';
+      (!any && !pr.optional ? '<div>' + badge('bad', pr.needText || 'выберите') + '</div>' : '') + '</div>';
   }
   // раскрывающийся блок: выключатель в заголовке, внутри — поля с grp === key
   function renderGroup(pr, all, API) {
@@ -530,7 +530,7 @@
         const F = formulaPlan(), T = F.ok ? changesText(F.j, F.ch, API) : [];
         h += '<div class="sec"><h2>Зубная формула</h2><div class="card"><div class="row" style="grid-template-columns:1fr auto;margin:0"><label>Внести изменения в зубную формулу</label><div><button class="tg ' + (SS.fon ? 'on' : '') + '" data-sfon="1"></button></div></div>' +
           (!SS.fon ? '' : !F.ok ? '<div style="margin-top:6px">' + badge('warn', F.why || 'формула недоступна') + '</div>'
-            : T.length ? '<div class="fdiff">' + fDiffH(T) + '</div>' : '<div class="hint" style="margin:6px 0 0">' + (SS.teeth.length ? 'Всё уже отмечено — менять нечего' : 'Отметьте зубы') + '</div>') +
+            : T.length ? '<div class="fdiff">' + fDiffH(T) + '</div>' : '<div class="hint" style="margin:6px 0 0">' + (SS.teeth.length || !sc.needTeeth ? 'Всё уже отмечено — менять нечего' : 'Отметьте зубы') + '</div>') +
           '</div></div>';
       }
       const iss = (sc.check ? sc.check(effParams(), SS.teeth, { touched: SS.touched }) : []);

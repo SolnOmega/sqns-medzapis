@@ -448,7 +448,8 @@
     if (pr.type === 'seg' && pr.wide) return '<div class="wrow"><div class="flbl">' + esc(pr.label) + '</div>' + ctl + '</div>';
     else if (pr.type === 'toggle') ctl = '<button class="tg ' + (v ? 'on' : '') + '" data-stg="' + pr.key + '"></button>';
     else if (pr.type === 'opt') ctl = optH('data-sopt="' + pr.key + '"', 'data-soptv="' + pr.key + '"', pr.options, v);
-    else if (pr.type === 'counter') ctl = '<div class="cnt"><button data-scnt="' + pr.key + '" data-d="-1">−</button><b>' + (v == null ? '—' : +v || 0) + '</b><button data-scnt="' + pr.key + '" data-d="1">+</button><span>' + esc(pr.unit || '') + '</span>' + (v == null && pr.need ? badge('bad', 'укажите') : '') + '</div>';
+    // «укажите» — слева от счётчика: когда надпись пропадает, кнопки не сдвигаются (счётчик прижат вправо)
+    else if (pr.type === 'counter') ctl = '<div class="cnt">' + (v == null && pr.need ? badge('bad', 'укажите') : '') + '<button data-scnt="' + pr.key + '" data-d="-1">−</button><b>' + (v == null ? '—' : +v || 0) + '</b><button data-scnt="' + pr.key + '" data-d="1">+</button><span>' + esc(pr.unit || '') + '</span></div>';
     else if (pr.type === 'perTooth') {
       const tt = (pr.teethFrom ? (p[pr.teethFrom] || []) : SS.teeth).map(String);
       if (!tt.length) return pr.teethFrom ? '' : '<div class="row"><label>' + esc(pr.label) + '</label><div>' + badge('warn', 'отметьте зубы') + '</div></div>';

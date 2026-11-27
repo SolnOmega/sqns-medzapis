@@ -265,6 +265,7 @@
     const F = d.features || {};
     return '<div class="dp-f" data-form="' + esc(id) + '"><div class="dp-fio">' + esc(d.fio || label(d)) + '</div><div class="dp-sub">' + (d.dead ? 'вход закончился' : d.id === activeId() && ST.mode === 'doc' ? 'сейчас работает' : 'вход сохранён') + '</div>' +
       '<div class="dp-l">Подпись на кнопке</div><input type="text" maxlength="30" value="' + esc(d.label || '') + '" placeholder="' + esc(d.short || '') + '" data-dname>' +
+      '<div class="dp-l">Должность для подписи</div><input type="text" maxlength="60" value="' + esc(d.pos || '') + '" placeholder="Врач-стоматолог" data-dpos>' +
       '<div class="dp-l">Цвет</div>' + colorsH(d.color) +
       '<div class="dp-l">Что показывать</div><div class="dp-fe">' + FEATURES.map(([k, t]) => '<label><input type="checkbox" data-dfeat="' + k + '"' + (F[k] === false ? '' : ' checked') + '>' + t + '</label>').join('') + '</div>' +
       '<div class="dp-b"><button class="dp-re" data-dre="' + esc(id) + '">Войти заново</button><span class="sp"></span><button class="dp-del" data-ddel="' + esc(id) + '">Убрать из списка</button></div>' +
@@ -305,11 +306,11 @@
       const f = el.closest('[data-form]'), id = f.dataset.form, col = f.querySelector('.dp-c.on'), color = col ? col.dataset.dcol : COLORS[0];
       POP.edit = null;
       if (id === 'new' || id === 'unknown') { addDoctor(color); return; }
-      const nm = f.querySelector('[data-dname]'), feats = {};
+      const nm = f.querySelector('[data-dname]'), ps = f.querySelector('[data-dpos]'), feats = {};
       f.querySelectorAll('[data-dfeat]').forEach((cb) => { feats[cb.dataset.dfeat] = cb.checked; });
-      editDoctor(id, { color, label: nm ? nm.value.trim() : '', features: feats });
+      editDoctor(id, { color, label: nm ? nm.value.trim() : '', pos: ps ? ps.value.trim() : '', features: feats });
     });
-    const inp = P.querySelector('[data-dname]'); if (inp) inp.addEventListener('keydown', (e) => e.stopPropagation());
+    P.querySelectorAll('[data-dname],[data-dpos]').forEach((inp) => inp.addEventListener('keydown', (e) => e.stopPropagation()));
     P.addEventListener('click', (e) => e.stopPropagation());
   }
 

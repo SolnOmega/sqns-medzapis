@@ -31,7 +31,7 @@
   const LAT = { 'А': 'A', 'В': 'B', 'С': 'C', 'Е': 'E', 'К': 'K', 'М': 'M', 'Н': 'H', 'О': 'O', 'Р': 'P', 'Т': 'T', 'Х': 'X' };
   const normCode = (name) => ((name || '').trim().split(/\s+/)[0] || '').replace(/[АВСЕКМНОРТХ]/g, (c) => LAT[c]);
 
-  const ENGINE_VERSION = '1.9.5';
+  const ENGINE_VERSION = '1.10.0';
   // В визите может быть несколько дневников: SQNS держит их все на странице (каждый со своим journalIndex).
   // Какой открыт, по странице не понять, поэтому: выбранный в панели → иначе последний пустой → иначе последний.
   let JPICK = null;   // индекс дневника, выбранный врачом в панели
@@ -655,7 +655,7 @@
     host = document.createElement('div'); host.id = 'sqns-medzapis';
     document.body.appendChild(host);
     root = host.attachShadow({ mode: 'open' });
-    root.innerHTML = '<style>' + CSS + ((globalThis.SQNSMZ_SVCVIEW || {}).css || '') + ((globalThis.SQNSMZ_PLANVIEW || {}).css || '') + (DOCS() ? DOCS().css : '') + '</style>' +
+    root.innerHTML = '<style>' + CSS + ((globalThis.SQNSMZ_SVCVIEW || {}).css || '') + ((globalThis.SQNSMZ_PLANVIEW || {}).css || '') + ((globalThis.SQNSMZ_PRINT || {}).css || '') + (DOCS() ? DOCS().css : '') + '</style>' +
       '<div class="strip" id="strip"></div><div class="dock" id="dock"></div><div class="dpop" id="dpop"></div>' +
       '<div class="wrap" id="wrap"><div class="shade" id="shade"></div><div class="panel" id="panel"></div></div>' +
       '<div class="toast" id="toast"></div><div class="lock" id="lock"></div>';
@@ -667,6 +667,7 @@
   // Открыть панель на нужной вкладке. Без указания: в визите нет услуг → «Услуги», есть → «Медзапись».
   function openPanel(v) { buildInitialState(); undoSnap = undoSnap || null; togglePop(false);
     if (v === 'plan' && PLANV()) VIEW = 'plan';
+    else if (v === 'print' && PRINTV()) VIEW = 'print';
     else if (SVCV()) VIEW = v === 'svc' || v === 'diary' ? v : (S.services.length ? 'diary' : 'svc');
     render(); wrap.classList.add('open'); isOpen = true; }
   function closePanel() { wrap.classList.remove('open'); isOpen = false; }
@@ -693,8 +694,8 @@
       else if (cur.mode === 'login') doc = '<button class="di doc warn" data-dk="doc"><span class="av">→</span><span>' + esc(cur.text) + '</span><span class="cv">▾</span></button>';
       else if (cur.mode !== 'none') doc = '<button class="di doc gray" data-dk="doc" title="Врачи (Alt+D)"><span class="av">' + (cur.mode === 'wait' ? '…' : '?') + '</span><span>' + esc(cur.text) + '</span><span class="cv">▾</span></button>';
     }
-    const it = (k, ic, t, dot, extra) => '<button class="di' + (extra || '') + '" data-dk="' + k + '">' + (dot ? '<span class="nd"></span>' : '') + '<span class="ic">' + ic + '</span><span>' + t + '</span>' + (k === 'print' ? '<span class="sn">скоро</span>' : '') + '</button>';
-    const h = cur && cur.mode === 'login' ? doc : doc + (SVCV() ? it('svc', '🧾', 'Услуги', st.svc) : '') + it('diary', '📝', 'Медзапись', st.diary) + (ok('plan') ? it('plan', '📋', 'План') : '') + (ok('print') ? it('print', '🖨️', 'Печать', false, ' soon') : '');
+    const it = (k, ic, t, dot, extra) => '<button class="di' + (extra || '') + '" data-dk="' + k + '">' + (dot ? '<span class="nd"></span>' : '') + '<span class="ic">' + ic + '</span><span>' + t + '</span>' +  '</button>';
+    const h = cur && cur.mode === 'login' ? doc : doc + (SVCV() ? it('svc', '🧾', 'Услуги', st.svc) : '') + it('diary', '📝', 'Медзапись', st.diary) + (ok('plan') ? it('plan', '📋', 'План') : '') + (ok('print') && PRINTV() ? it('print', '🖨️', 'Печать') : '');
     if (h !== DOCK_HTML) { D.innerHTML = h; DOCK_HTML = h; }
     D.classList.toggle('pin', popOpen);
     const S2 = root.getElementById('strip');
@@ -726,7 +727,8 @@
       if (a) { closePanel(); a.click(); toast('Открыты «Планы лечения»'); } else toast('Откройте карточку пациента', 'warn');
       return;
     }
-    if (k === 'print') toast('Печать актов и планов — скоро', 'warn');
+    if (k === 'print') { if (DOCS() && !DOCS().allowed('print')) return; if (!PRINTV()) { toast('Модуль печати не загружен', 'warn'); return; }
+      if (isOpen && VIEW === 'print') closePanel(); else openPanel('print'); }
   }
   function lockTab(msg) {
     const L = root && root.getElementById('lock'); if (!L) return;
@@ -848,6 +850,17 @@
     gotoDiary: () => { VIEW = 'diary'; buildInitialState(); render(); },
   };
   const PLANV = () => globalThis.SQNSMZ_PLANVIEW || null;
+  const PRINTV = () => globalThis.SQNSMZ_PRINT || null;
+  // вкладка «Печать» (print.js): документы пациента и настройки печати
+  function renderPrint(P) {
+    const prevScroll = P.querySelector('.body') ? P.querySelector('.body').scrollTop : 0;
+    const v = PRINTV().render(SVC_API);
+    P.innerHTML = '<div class="hd"><div style="font-size:26px">🖨️</div><h1>Печать<small>документы пациента · v' + ENGINE_VERSION + '</small></h1>' +
+      '<button class="x" id="close">×</button></div><div class="body">' + v.body + '</div><div class="ft">' + v.foot + '</div>';
+    P.querySelector('#close').onclick = closePanel;
+    PRINTV().bind(P, SVC_API);
+    const body = P.querySelector('.body'); if (body) body.scrollTop = prevScroll;
+  }
   const viewTabs = () => '';   // вкладки заменены боковыми кнопками
   // вкладка «План» (plan.js): план лечения из сценариев «Услуг»
   function renderPlan(P) {
@@ -876,6 +889,8 @@
     const P = root.getElementById('panel'); const ctx = getCtx();
     if (!S) buildInitialState();
     if (VIEW === 'plan' && PLANV()) { renderPlan(P); return; }
+    if (VIEW !== 'print' && PRINTV()) PRINTV().leave();
+    if (VIEW === 'print' && PRINTV()) { if (PLANV()) PLANV().leave(); renderPrint(P); return; }
     if (PLANV()) PLANV().leave();   // из «Плана» в «Услуги» / «Медзапись»: вернуть состояние вкладки «Услуги»
     if (VIEW === 'svc' && SVCV()) { renderSvc(P); return; }
     const prevScroll = P.querySelector('.body') ? P.querySelector('.body').scrollTop : 0;
@@ -1049,7 +1064,7 @@
   document.addEventListener('keydown', (e) => {
     if (!root) return;
     if (e.altKey && !e.ctrlKey && !e.metaKey) {
-      const k = { KeyM: 'toggle', Digit1: 'svc', Digit2: 'diary', Digit3: 'plan', KeyD: 'doc' }[e.code];
+      const k = { KeyM: 'toggle', Digit1: 'svc', Digit2: 'diary', Digit3: 'plan', Digit4: 'print', KeyD: 'doc' }[e.code];
       if (k) { e.preventDefault(); if (k === 'toggle') { isOpen ? closePanel() : openPanel(); } else dockAction(k); }
     }
     if (e.key === 'Escape') { if (popOpen) togglePop(false); else if (isOpen) closePanel(); }

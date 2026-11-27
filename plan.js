@@ -126,7 +126,7 @@
   let PS = null, ACT = null;   // ACT — редактируемый блок { si, bi }
   let SET = null;              // какое состояние мы отдали движку в последний раз: { st, si, bi }
   function give(si, bi, st) { E.setState(st); SET = { st, si, bi }; }
-  const blank = () => ({ peek: null, view: 'list', client: null, planId: null, newKey: null, title: '', titleTouched: false, userComment: '', applied: false, stages: [], base: null, busy: false, error: '', confirm: null });
+  const blank = () => ({ peek: null, view: 'list', client: null, planId: null, newKey: null, title: '', titleTouched: false, userComment: '', applied: false, stages: [], base: null, busy: false, error: '', confirm: null, discount: 0, discMixed: false, discIn: null, sqTot: null });
   const VERB = { caries: 'лечение кариеса', hygiene: 'профессиональная гигиена', pulpitis: 'лечение пульпита', periodontitis: 'лечение периодонтита', recalc: 'смена кальция',
     obturation: 'пломбирование каналов', extraction: 'удаление', implant: 'установка имплантатов', fdm: 'установка формирователей десны', sinus: 'синус-лифтинг', nkr: 'костная пластика', ortho: 'протезирование' };
   const CATN = { ther: 'Терапевтическая подготовка', surg: 'Хирургическая подготовка', ortho: 'Ортопедический этап' };
@@ -220,9 +220,45 @@
     await savePlan(fs);
     fs = formScope() || fs; f = getF(fs);
     PS.planId = f.id || ((tabScope() || {}).selectedTreatmentPlan || {}).id || PS.planId;
+    PS.sqTot = totOf(f);
     const sq = sqStages(f), ch = chain();
     if (sq.length) ch.forEach((s, k) => { if (sq[k]) { s.sq = sq[k].id; s.flat = false; } });
     return fs;
+  }
+  /* ---------------- скидка плана (как поле «Итого»/«%» в SQNS) ---------------- */
+  // SQNS: процент скидки у каждой строки; поле плана «%» ставит один процент всем строкам (formTotalDiscountChanged),
+  // поле «Итого» считает процент = round(100·(1 − итого / сумма без скидки), 2) и делает то же. Здесь — те же шаги.
+  const r2 = (n) => Math.round((+n || 0) * 100) / 100;
+  function discOf(f) {
+    const ds = [...new Set((f.treatmentPlanItems || []).filter(isSvc).map((it) => r2(it.discount)))];
+    return ds.length <= 1 ? { discount: ds[0] || 0, discMixed: false } : { discount: null, discMixed: true };
+  }
+  function totOf(f) {
+    try { return { full: r2(f.getTotalSum ? f.getTotalSum() : 0), sum: r2(f.getTotalPrice ? f.getTotalPrice() : f.totalPrice) }; } catch (e) { return null; }
+  }
+  function setDisc(fs, pct) {
+    const f = getF(fs); f.totalDiscount = pct;
+    const s2 = up(fs, 'formTotalDiscountChanged');
+    if (s2) s2.formTotalDiscountChanged();
+    else (f.treatmentPlanItems || []).forEach((u) => { u.discount = pct; if (typeof u.sync === 'function') u.sync('discount'); });
+    applyRoot(fs);
+  }
+  const parseNum = (v) => { const x = parseFloat(String(v == null ? '' : v).replace(/\s/g, '').replace(',', '.')); return isFinite(x) ? x : null; };
+  function applyDiscount(API) {
+    const D = PS.discIn || {}, v = parseNum(D.v);
+    if (v == null || v < 0) { API.toast('Введите процент или итоговую сумму', 'warn'); return; }
+    if (D.mode !== 'sum' && v > 100) { API.toast('Скидка не может быть больше 100 %', 'warn'); return; }
+    if (!PS.planId) {
+      if (D.mode === 'sum') { API.toast('Итоговую сумму можно задать после сохранения первого этапа; сейчас — процент', 'warn'); return; }
+      PS.discount = r2(v); PS.discMixed = false; PS.discIn = null; API.toast('Скидка ' + PS.discount + ' % применится при сохранении этапа', 'ok'); API.rerender(); return;
+    }
+    return run(API, async () => {
+      const fs = await ensurePlan(), f = getF(fs);
+      let pct = v;
+      if (D.mode === 'sum') { const full = f.getTotalSum ? f.getTotalSum() : 0; if (!full) throw new Error('В плане нет услуг'); if (v > full) throw new Error('Итого больше суммы без скидки'); pct = r2(100 * (1 - v / full)); }
+      setDisc(fs, r2(pct)); PS.discount = r2(pct); PS.discMixed = false; PS.discIn = null;
+      await commit(fs, PS.stages.map((x, i) => (x.ro ? null : calcStage(i))));
+    }, 'Скидка применена в плане SQNS');
   }
   const stageItemsOf = (f, s) => (f.treatmentPlanItems || []).filter((it) => (s.flat ? it.stageID == null : s.sq != null && it.stageID === s.sq));
   function dropItems(fs, s) {
@@ -263,6 +299,7 @@
           stageID = s.sq;
         } else { s.flat = true; s.sq = null; }
         for (const l of calc0.lines) added.push(await addPlanItem(fs, stageID, l, await E.loadCard(l.id)));
+        if (PS.discount) setDisc(fs, PS.discount);   // новые строки — с той же скидкой, что у плана
         s.fp = fpLines(calc0.lines); s.saved = true;
         const calcs = PS.stages.map((x, i) => (x.ro ? null : calcStage(i)));
         await commit(fs, calcs);
@@ -324,7 +361,7 @@
         return Object.assign(base, { name: r.nameTouched ? g.flat ? r.name : g.name : '', nameTouched: !!r.nameTouched, fp: r.fp, blocks: r.blocks.map((o) => E.stateFrom(o)) });
       }
       return Object.assign(base, { ro: true, changed: !!(r && !r.ro), name: g.flat ? (r && r.name) || 'Этап' : g.name, nameTouched: true, blocks: [],
-        items: g.items.filter(isSvc).map((it) => ({ name: it.name, teeth: it.teeth || [], qty: +it.qty || 0, sum: +it.sum || 0, provided: +it.providedQty > 0 })) });
+        items: g.items.filter(isSvc).map((it) => ({ name: it.name, teeth: it.teeth || [], qty: +it.qty || 0, sum: it.price != null ? r2((+it.qty || 0) * (+it.price || 0)) : +it.sum || 0, provided: +it.providedQty > 0 })) });   // без скидки — как у этапов из шаблонов; скидка — отдельной строкой
     });
   }
   // открыть план в SQNS (если он ещё не открыт там) и дождаться состава
@@ -352,7 +389,7 @@
           const f = await loadSqnsPlan(p);
           if (PS !== me) return;
           const sp2 = splitComment(f.comment);
-          Object.assign(me, { stages: stagesFromSqns(f, sp2.recipe), userComment: sp2.user, title: f.title || me.title, applied: !!f.applied, hadRecipe: !!sp2.recipe });
+          Object.assign(me, { stages: stagesFromSqns(f, sp2.recipe), userComment: sp2.user, title: f.title || me.title, applied: !!f.applied, hadRecipe: !!sp2.recipe, sqTot: totOf(f) }, discOf(f));
           if (me.peek != null && me.peek >= me.stages.length) me.peek = null;
         } catch (e) { if (PS === me) me.error = String((e && e.message) || e); }
         if (PS === me) { me.verifying = false; API.rerender(); }
@@ -361,7 +398,7 @@
     }
     return run(API, async () => {
       const f = await loadSqnsPlan(p), sp2 = splitComment(f.comment);
-      PS = Object.assign(blank(), { view: 'build', client: keep, planId: f.id, title: f.title || '', titleTouched: true, userComment: sp2.user, applied: !!f.applied, stages: stagesFromSqns(f, sp2.recipe), base: baseFormula(API), hadRecipe: !!sp2.recipe });
+      PS = Object.assign(blank(), { view: 'build', client: keep, planId: f.id, title: f.title || '', titleTouched: true, userComment: sp2.user, applied: !!f.applied, stages: stagesFromSqns(f, sp2.recipe), base: baseFormula(API), hadRecipe: !!sp2.recipe, sqTot: totOf(f) }, discOf(f));
       ACT = null;
     });
   }
@@ -405,6 +442,9 @@
   .pl-add:hover:not(:disabled){background:#eef2ff} .pl-add:disabled{opacity:.5;cursor:default}
   .pl-ro{font-size:12px;color:#334155} .pl-ro div{display:flex;gap:8px;justify-content:space-between;padding:3px 0;border-bottom:1px dashed #eef2f7} .pl-ro div:last-child{border:0}
   .pl-tot{display:flex;justify-content:space-between;font-weight:800;font-size:14px;padding:8px 4px}
+  .pl-disc{margin-top:4px} .pl-dh{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12.5px;color:#334155;margin-bottom:8px} .pl-dh>b{font-size:13px;color:#0f172a}
+  .pl-dr{display:flex;align-items:center;gap:6px;flex-wrap:wrap} .pl-dr input{width:76px;padding:6px 8px} .pl-dr input[data-plds]{width:120px} .pl-dr span{font-size:12.5px;color:#475569} .pl-dr .pl-or{margin:0 4px;color:#94a3b8}
+  .pl-dr .pl-ib{margin-left:auto}
   .pl-act2{display:flex;align-items:center;gap:8px;flex:1} .pl-act2 label{font-size:12.5px;color:#334155;font-weight:600;cursor:pointer}
   `;
 
@@ -466,7 +506,8 @@
         '</div></div></div>' + (peek ? '<div class="pl-sb pl-ro">' + peekRows(s, c).map((x) => '<div><span>' + esc(x.name) + (x.teeth.length ? ' <b>' + x.teeth.map(FMT).join(', ') + '</b>' : '') + (x.qty !== 1 ? ' × ' + x.qty : '') + (x.provided ? ' ' + badge('ok', 'оказано') : '') + '</span><span>' + (x.sum == null ? '…' : rub(x.sum)) + '</span></div>').join('') + '</div>' : '') + '</div>';
     });
     if (openSi < 0) h += '<button class="pl-add" data-pl="stage"' + (B ? ' disabled' : '') + '>＋ Добавить этап</button>';
-    if (PS.stages.length) h += '<div class="pl-tot"><span>Итого по плану</span><span>' + (missing ? '…' : rub(total)) + '</span></div>';
+    if (PS.stages.length) h += '<div class="pl-tot"><span>' + (PS.discount || PS.discMixed ? 'Сумма без скидки' : 'Итого по плану') + '</span><span>' + (missing ? '…' : rub(total)) + '</span></div>';
+    if (PS.stages.length && openSi < 0) h += discCard();
     if (PS.error) h += '<div class="sec"><div class="iss"><div class="bad">⛔ ' + esc(PS.error) + '</div></div></div>';
 
     let foot;
@@ -475,6 +516,7 @@
       foot = '<button class="btn sec2" data-pl="cancel"' + (B ? ' disabled' : '') + '>Отмена</button><button class="btn pri" data-pl="save"' + (B || !c || c.bad ? ' disabled' : '') + '>' + (B ? 'Сохраняю…' : '💾 Сохранить этап') + '</button>';
     } else {
       foot = '<div class="pl-act2"><button class="tg ' + (PS.applied ? 'on' : '') + '" data-pl="applied" id="plap"' + (B ? ' disabled' : '') + '></button><label for="plap">Сделать план активным</label></div>' +
+        (PS.planId && globalThis.SQNSMZ_PRINT && (!globalThis.SQNSMZ_DOCTORS || globalThis.SQNSMZ_DOCTORS.allowed('print')) ? '<button class="btn sec2" data-pl="print"' + (B ? ' disabled' : '') + ' title="Печать плана лечения">🖨 Распечатать</button>' : '') +
         '<button class="btn pri" data-pl="finish" style="flex:none"' + (B ? ' disabled' : '') + '>' + (B ? 'Сохраняю…' : '✓ Завершить') + '</button>';
     }
     // в конце: движок должен смотреть на редактируемый блок (события полей меняют именно его)
@@ -484,6 +526,19 @@
       E.setCtx({ formula: formulaAt(ACT.si, ACT.bi), stageItems: items }); give(ACT.si, ACT.bi, st);
     }
     return { body: h, foot };
+  }
+  // скидка на весь план: процент или итоговая сумма (как поля «%» и «Итого» плана в SQNS)
+  function discCard() {
+    const D = PS.discIn, B = PS.busy || PS.verifying, T = PS.sqTot;
+    const pv = D && D.mode === 'pct' ? D.v : D ? '' : PS.discount ? String(PS.discount).replace('.', ',') : '';
+    const sv = D && D.mode === 'sum' ? D.v : D ? '' : PS.discount && T ? String(T.sum).replace('.', ',') : '';
+    let h = '<div class="card pl-disc"><div class="pl-dh"><b>Скидка на план</b>' +
+      (PS.discMixed ? badge('warn', 'в SQNS у строк разные скидки — новая заменит все') : PS.discount && T ? '<span>' + esc(String(PS.discount).replace('.', ',')) + ' % · к оплате <b>' + rub(T.sum) + '</b></span>' : '') + '</div>' +
+      '<div class="pl-dr"><input type="text" inputmode="decimal" data-pldp="1" value="' + esc(pv) + '" placeholder="0"><span>%</span><span class="pl-or">или итого</span>' +
+      '<input type="text" inputmode="decimal" data-plds="1" value="' + esc(sv) + '" placeholder="' + esc(T ? String(T.full).replace('.', ',') : '') + '"' + (PS.planId ? '' : ' disabled') + '><span>₽</span>' +
+      '<button class="pl-ib" data-pl="disc"' + (B || !D ? ' disabled' : '') + '>Применить</button></div>' +
+      '<div class="hint" style="margin:6px 0 0">Как в SQNS: процент ставится всем строкам плана; по итоговой сумме процент считается сам (до сотых, итог может отличаться на копейки).</div></div>';
+    return h;
   }
   // строки этапа для просмотра: «только просмотр» — из SQNS, остальные — из блоков (цены — из SQNS)
   function peekRows(s, c) {
@@ -523,6 +578,9 @@
     const openStage = () => PS.stages.findIndex((s) => s.open);
     const activate = (si, bi) => { ACT = { si, bi }; const st = PS.stages[si].blocks[bi]; const sc = E.scnById(st.scn); E.setOpenCat(sc ? sc.cat : null); };
     on('[data-plo]', 'click', (e) => { const id = e.currentTarget.dataset.plo; const p = visiblePlans(tabScope()).find((x) => String(x.__id__) === id); if (p) openPlan(API, p); });
+    on('[data-pldp]', 'input', (e) => { PS.discIn = { mode: 'pct', v: e.target.value }; const o = P.querySelector('[data-plds]'); if (o) o.value = ''; const b = P.querySelector('[data-pl="disc"]'); if (b) b.disabled = PS.busy; });
+    on('[data-plds]', 'input', (e) => { PS.discIn = { mode: 'sum', v: e.target.value }; const o = P.querySelector('[data-pldp]'); if (o) o.value = ''; const b = P.querySelector('[data-pl="disc"]'); if (b) b.disabled = PS.busy; });
+    on('[data-pldp],[data-plds]', 'keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') applyDiscount(API); });
     on('[data-plt]', 'input', (e) => { PS.title = e.target.value.trim() ? e.target.value : ''; PS.titleTouched = !!PS.title; });
     on('[data-pln]', 'input', (e) => { const s = PS.stages[+e.target.dataset.pln]; s.name = e.target.value.trim() ? e.target.value : ''; s.nameTouched = !!s.name; });
     on('[data-pla]', 'input', (e) => { PS.stages[+e.target.dataset.pla].after = e.target.value.trim(); });
@@ -559,6 +617,14 @@
       if (a === 'save') { saveStage(API, openStage()); return; }
       if (a === 'applied') { PS.applied = !PS.applied; rr(); return; }
       if (a === 'finish') { finish(API); return; }
+      if (a === 'disc') { applyDiscount(API); return; }
+      if (a === 'print') {
+        const p = visiblePlans(tabScope()).find((x) => x.id === PS.planId);
+        if (!p) { API.toast('План не найден в списке планов пациента', 'bad'); return; }
+        PS.busy = true; rr();
+        Promise.resolve(globalThis.SQNSMZ_PRINT.printPlan(p, API)).finally(() => { PS.busy = false; rr(); });
+        return;
+      }
     });
     // поля редактируемого блока — обработчики движка «Услуг»
     if (ACT && PS && PS.view === 'build') V.bind(P, Object.assign({}, API, { marks: () => marksOf(E.inPlan() ? formulaAt(ACT.si, ACT.bi) : null) }));
@@ -566,5 +632,7 @@
   // выход из вкладки: состояние «Услуг» возвращается
   function leave() { E.leave(); }
 
-  globalThis.SQNSMZ_PLANVIEW = { css: CSS, render, bind, leave, _test: { state: () => PS, act: () => ACT, splitComment, joinComment, fpItems, fpLines, MARK, reset: () => { PS = null; ACT = null; } } };
+  // для печати (print.js): план и карточка пациента на странице
+  const sq = { tabScope, formScope, getF, sqStages, visiblePlans, loadSqnsPlan, splitComment };
+  globalThis.SQNSMZ_PLANVIEW = { css: CSS, render, bind, leave, sq, _test: { state: () => PS, act: () => ACT, splitComment, joinComment, fpItems, fpLines, MARK, reset: () => { PS = null; ACT = null; } } };
 })();

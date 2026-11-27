@@ -96,6 +96,52 @@
     return NEW;
   }
 
+  /* ---------------- скидка на визит (как поля «Итого» / «%» визита в SQNS) ---------------- */
+  // SQNS (VisitFormController): totalFocus(поле) запоминает текущие итоги, затем в popupTotalDiscount (%) или popupTotalCost (итого)
+  // пишется значение и вызывается totalCheck() — он раскладывает произвольную скидку по строкам (страховые строки не трогает)
+  // и отправляет визит на обновление. Здесь — те же три шага.
+  function visitDisc() {
+    const el = document.querySelector('[ng-controller="VisitFormController"]');
+    const s = el && up(scopeOf(el), 'totalCheck');
+    return s && s.form && typeof s.totalFocus === 'function' ? s : null;
+  }
+  function visitTotals(vs) {
+    try { const F = vs.form, full = +F.priceTotal() || 0, cost = +F.costTotal() || 0; return { full, cost, pct: full ? +F.discountTotal() || 0 : 0, n: (F.visitItems || []).length }; } catch (e) { return null; }
+  }
+  const parseNum = (v) => { const x = parseFloat(String(v == null ? '' : v).replace(/\s/g, '').replace(',', '.')); return isFinite(x) ? x : null; };
+  let VD = { open: false, mode: null, v: '' };
+  function applyVisitDisc(API) {
+    const vs = visitDisc(), v = parseNum(VD.v);
+    if (!vs) { API.toast('Визит не открыт', 'bad'); return; }
+    const T = visitTotals(vs);
+    if (v == null || v < 0) { API.toast('Введите процент или итоговую сумму', 'warn'); return; }
+    if (VD.mode === 'pct' && v > 100) { API.toast('Скидка не может быть больше 100 %', 'warn'); return; }
+    if (VD.mode === 'sum' && T && v > T.full) { API.toast('Итого больше суммы без скидки', 'warn'); return; }
+    const run = () => {
+      if (VD.mode === 'pct') { vs.totalFocus('discount'); vs.form.popupTotalDiscount = v; }
+      else { vs.totalFocus('cost'); vs.form.popupTotalCost = v; }
+      vs.totalCheck();
+    };
+    try { const r = vs.$root || vs; if (r.$$phase) run(); else vs.$apply(run); }
+    catch (e) { API.toast('Скидка: ' + ((e && e.message) || e), 'bad'); return; }
+    VD = { open: false, mode: null, v: '' };
+    const T2 = visitTotals(vs);
+    API.toast('Скидка применена' + (T2 ? ': к оплате ' + rub(T2.cost) : '') + '. Проверьте итог в визите.', 'ok');
+    API.rerender();
+  }
+  function discCard() {
+    const vs = visitDisc(), T = vs && visitTotals(vs);
+    if (!T || !T.n || !T.full) return '';
+    const p = String(Math.round(T.pct * 100) / 100).replace('.', ',');
+    let h = '<div class="sec"><h2>Скидка на визит</h2><div class="card"><div class="vd-h"><span>Сумма ' + rub(T.full) + (T.pct ? ' · скидка ' + p + ' %' : '') + ' · к оплате <b>' + rub(T.cost) + '</b></span>' +
+      (VD.open ? '' : '<button class="link" data-vd="open">' + (T.pct ? 'Изменить' : 'Задать скидку') + '</button>') + '</div>';
+    if (VD.open) h += '<div class="vd-r"><input type="text" inputmode="decimal" data-vdp="1" value="' + esc(VD.mode === 'pct' ? VD.v : '') + '" placeholder="' + esc(p) + '"><span>%</span><span class="vd-or">или итого</span>' +
+      '<input type="text" inputmode="decimal" data-vds="1" value="' + esc(VD.mode === 'sum' ? VD.v : '') + '" placeholder="' + esc(String(T.cost).replace('.', ',')) + '"><span>₽</span>' +
+      '<span class="vd-sp"></span><button class="link" data-vd="close">Отмена</button><button class="vd-b" data-vd="apply"' + (VD.mode ? '' : ' disabled') + '>Применить</button></div>' +
+      '<div class="hint" style="margin:6px 0 0">Как в SQNS: скидка раскладывается на все услуги визита. После — проверьте итог и сохраните визит.</div>';
+    return h + '</div></div>';
+  }
+
   /* ---------------- зубная формула: изменения по услугам ---------------- */
   // Компонент формулы SQNS — scope с собственным changeConfigService (есть на странице и при свёрнутой формуле).
   // changeConfigService(['36'], участок, состояние, вкл/выкл, false) — тот же путь, что ручной клик:
@@ -325,6 +371,10 @@
   .fdiff{margin-top:6px;font-size:12.5px} .fdr{display:flex;align-items:flex-start;gap:8px;padding:4px 0;border-bottom:1px dashed #e2e8f0} .fdr:last-child{border:0}
   .fdr .tchip{min-width:40px;text-align:center} .fdr>span:last-child{display:flex;flex-wrap:wrap;gap:4px 10px;padding-top:2px}
   .fon{color:#15803d;font-weight:600} .foff{color:#b91c1c}
+  .vd-h{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12.5px;color:#334155}
+  .vd-r{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:8px} .vd-r input{width:76px;padding:6px 8px} .vd-r input[data-vds]{width:120px}
+  .vd-r span{font-size:12.5px;color:#475569} .vd-r .vd-or{margin:0 4px;color:#94a3b8} .vd-sp{flex:1}
+  .vd-b{border:1px solid #c7d2fe;background:#eef2ff;color:#3730a3;border-radius:9px;padding:6px 11px;font-size:12.5px;font-weight:700;cursor:pointer} .vd-b:disabled{opacity:.45;cursor:default}
   ` + Object.values(D.TYPES || {}).map((t) => t.css || '').join('');
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const badge = (lvl, t) => '<span class="badge ' + lvl + '"><span class="dot"></span>' + esc(t) + '</span>';
@@ -563,6 +613,7 @@
       if (iss.length) h += '<div class="sec"><h2>Проверка</h2><div class="iss">' + iss.map((i) => '<div class="' + i.lvl + '">' + (i.lvl === 'bad' ? '⛔' : '⚠️') + ' ' + esc(i.text) + '</div>').join('') + '</div></div>';
       SS._bad = iss.some((i) => i.lvl === 'bad' && i.text !== SS.error) || !L.some((l) => !l.skip);
     }
+    if (!PL) h += discCard();
     if (PL) return { body: h, foot: '', bad: !sc || !!SS._bad };
     // после добавления следующий шаг — дневник: он становится главной кнопкой
     const foot = SS.done && !SS.busy
@@ -637,6 +688,11 @@
       touch: (keys) => keys.forEach((k) => { SS.touched[k] = 1; }),
     };
     (scnById(SS.scn) || { params: [] }).params.forEach((pr) => { const TY = (D.TYPES || {})[pr.type]; if (TY && TY.bind) TY.bind(P, pr, SS.params, re, tyCtx); });
+    on('[data-vd]', 'click', (e) => { const a = e.currentTarget.dataset.vd; if (a === 'apply') { applyVisitDisc(API); return; } VD = { open: a === 'open', mode: null, v: '' }; API.rerender(); });
+    const vdIn = (mode, other) => (e) => { VD.mode = mode; VD.v = e.target.value; const o = P.querySelector(other); if (o) o.value = ''; const b = P.querySelector('[data-vd="apply"]'); if (b) b.disabled = false; };
+    on('[data-vdp]', 'input', vdIn('pct', '[data-vds]'));
+    on('[data-vds]', 'input', vdIn('sum', '[data-vdp]'));
+    on('[data-vdp],[data-vds]', 'keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') applyVisitDisc(API); });
     const add = P.querySelector('#svcadd'); if (add) add.onclick = () => doAdd(API);
     const undo = P.querySelector('#svcundo'); if (undo) undo.onclick = () => doUndo(API);
     const dia = P.querySelector('#svcdiary'); if (dia) dia.onclick = () => API.gotoDiary();

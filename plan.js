@@ -130,11 +130,18 @@
   const AFTER = ['2 нед.', '1 мес.', '2–3 мес.', '3–4 мес.', '4–6 мес.', '6–9 мес.'];
   const chain = () => PS.stages.filter((s) => !s.loose);   // этапы, которые соответствуют этапам SQNS по порядку
 
-  // формула перед блоком (si, bi): формула пациента + изменения всех блоков раньше
+  // формула перед блоком (si, bi): формула пациента + изменения всех блоков раньше.
+  // Нужна только редактируемому блоку; запоминается, пока изменения блоков выше те же (копировать формулу дорого).
+  let FMEMO = { key: null, j: null };
   function formulaAt(si, bi) {
     if (!PS.base) return null;
+    const ops = [];
+    PS.stages.forEach((s, i) => { if (i > si || s.ro) return; s.blocks.forEach((st, k) => { if (i === si && k >= bi) return; if (st.scn) ops.push(E.withState(st, () => E.formulaOps())); }); });
+    const key = JSON.stringify(ops, (k, v) => (v instanceof RegExp ? String(v) : v));
+    if (FMEMO.key === key && FMEMO.base === PS.base) return FMEMO.j;
     const j = clone(PS.base);
-    PS.stages.forEach((s, i) => { if (i > si || s.ro) return; s.blocks.forEach((st, k) => { if (i === si && k >= bi) return; if (st.scn) E.applyToJson(j, E.withState(st, () => E.formulaOps())); }); });
+    ops.forEach((o) => E.applyToJson(j, o));
+    FMEMO = { key, base: PS.base, j };
     return j;
   }
   // расчёт этапа: корзины блоков (строки, сумма, проблемы); onPrice — перерисовать, когда придут цены
@@ -142,7 +149,7 @@
     const s = PS.stages[si], items = [], carts = [];
     s.blocks.forEach((st, bi) => {
       if (!st.scn) { carts.push(null); return; }
-      E.setCtx({ formula: formulaAt(si, bi), stageItems: items.slice() });
+      E.setCtx({ formula: null, stageItems: items.slice() });   // строкам и сумме формула не нужна
       const c = E.withState(st, () => E.cartOf(onPrice));
       c.lines.forEach((l) => items.push({ name: (E.SVC[l.id] || {}).code || '', serviceID: l.id, teeth: l.teeth || [] }));
       carts.push(c);
@@ -327,10 +334,15 @@
       ACT = null;
     });
   }
+  // формула пациента — облегчённая копия: только какие состояния активны (полная формула SQNS тяжёлая)
   function baseFormula(API) {
     let j = E.liveFormula(API);
     if (typeof j === 'string') { try { j = JSON.parse(j); } catch (e) { j = null; } }
-    return j && j.permanentTeeth ? clone(j) : null;
+    if (!j || !j.permanentTeeth) return null;
+    const lean = (T) => { const o = {}; Object.keys(T || {}).forEach((t) => { const L = (T[t] || {}).locations || {}, l2 = {};
+      Object.keys(L).forEach((l) => { const S2 = (L[l] || {}).states || {}, s2 = {}; Object.keys(S2).forEach((k) => { s2[k] = { isActive: !!(S2[k] && S2[k].isActive) }; }); l2[l] = { states: s2 }; });
+      o[t] = { toothKey: (T[t] || {}).toothKey, locations: l2 }; }); return o; };
+    return { permanentTeeth: lean(j.permanentTeeth), deciduousTeeth: lean(j.deciduousTeeth), unremovableLocationsDueToothRemoval: (j.unremovableLocationsDueToothRemoval || ['gum', 'bone', 'default']).slice() };
   }
 
   /* ---------------- рендер ---------------- */

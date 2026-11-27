@@ -31,7 +31,7 @@
   const LAT = { 'А': 'A', 'В': 'B', 'С': 'C', 'Е': 'E', 'К': 'K', 'М': 'M', 'Н': 'H', 'О': 'O', 'Р': 'P', 'Т': 'T', 'Х': 'X' };
   const normCode = (name) => ((name || '').trim().split(/\s+/)[0] || '').replace(/[АВСЕКМНОРТХ]/g, (c) => LAT[c]);
 
-  const ENGINE_VERSION = '1.8.1';
+  const ENGINE_VERSION = '1.8.3';
   // В визите может быть несколько дневников: SQNS держит их все на странице (каждый со своим journalIndex).
   // Какой открыт, по странице не понять, поэтому: выбранный в панели → иначе последний пустой → иначе последний.
   let JPICK = null;   // индекс дневника, выбранный врачом в панели
@@ -273,7 +273,56 @@
     if (C.postBuild) C.postBuild(blocks, { newBlock, tplById, setParam, page: PAGE, services });
     blocks.forEach((b) => { const t = tplById(b.tpl); if (t.finalize) t.finalize(b, blocks, PAGE); });
     const recPos = services.map((s) => (POSITION_BY_CODE.find(([c]) => s.code.startsWith(c)) || [])[1]).find(Boolean) || null;
-    S = { services, unmatched, blocks, recPos, position: null, posTouched: false, duration: LS.get('duration', DEFAULT_DURATION), mode: 'replace', edits: {}, tab: 'diary' };
+    S = { services, unmatched, blocks, recPos, position: null, posTouched: false, duration: LS.get('duration', DEFAULT_DURATION), mode: 'replace', edits: {}, tab: 'diary', conts: [], contPick: new Set(), manualOk: false };
+    initConts();
+  }
+
+  /* ---- визит без услуг: продолжение лечения (ортопедия по этапам, осмотр после операции…) или шаблон вручную ---- */
+  // Выбор врача помним по визиту, чтобы он не терялся при пересборке панели
+  let CONT_MEM = { visit: null, ids: null, manual: false };
+  const visitKey = () => String((PAGE && PAGE.visitId) || '') + '|' + (JPICK == null ? '' : JPICK);
+  function initConts() {
+    if (S.services.length || !C.continuations) return;
+    let list = [];
+    try { list = C.continuations(PAGE) || []; } catch (e) { console.warn('[Медзапись] продолжение лечения', e); }
+    const me = [localStorage.getItem('currentEmployeeId'), localStorage.getItem('currentUserId')].filter(Boolean);
+    list.forEach((c) => { c.emp = c.emp || []; c.who = !c.emp.length ? '' : c.emp.some((x) => me.includes(x)) ? 'mine' : 'other'; });
+    list.sort((a, b) => (a.who === 'other') - (b.who === 'other'));
+    S.conts = list;
+    let ids;
+    if (CONT_MEM.visit === visitKey() && CONT_MEM.ids) { ids = CONT_MEM.ids.filter((id) => list.some((c) => c.id === id)); S.manualOk = CONT_MEM.manual; }
+    else {
+      // сам выбираем, только если вариант один или ровно один ведёт этот врач (а у остальных автор известен и он другой)
+      const mine = list.filter((c) => c.who === 'mine'), unknown = list.filter((c) => !c.who);
+      const auto = list.length === 1 ? list[0] : mine.length === 1 && !unknown.length ? mine[0] : null;
+      ids = auto ? [auto.id] : [];
+      CONT_MEM = { visit: visitKey(), ids: ids.slice(), manual: false };
+    }
+    ids.forEach((id) => addCont(id));
+  }
+  function addCont(id) {
+    const c = S.conts.find((x) => x.id === id); if (!c || S.contPick.has(id)) return;
+    let bl = [];
+    try { bl = c.make({ newBlock, tplById, setParam, page: PAGE }) || []; } catch (e) { console.warn(e); }
+    bl.forEach((b) => { b.contId = id; const t = tplById(b.tpl); if (t.finalize) try { t.finalize(b, S.blocks.concat(bl), PAGE); } catch (e) { /* */ } });
+    S.blocks.push(...bl); S.contPick.add(id);
+  }
+  function toggleCont(id) {
+    if (S.contPick.has(id)) { S.blocks = S.blocks.filter((b) => b.contId !== id); S.contPick.delete(id); }
+    else addCont(id);
+    CONT_MEM = { visit: visitKey(), ids: [...S.contPick], manual: S.manualOk };
+  }
+  function contCard() {
+    const card = (c) => {
+      const on = S.contPick.has(c.id);
+      const who = c.who === 'mine' ? badge('ok', 'ведёте вы') : c.who === 'other' ? badge('warn', 'ведёт другой врач') : '';
+      return '<button class="cont' + (on ? ' on' : '') + '" data-cont="' + esc(c.id) + '"><span class="ci">' + c.icon + '</span><span class="ct"><b>' + esc(c.title) + '</b><span>' + esc(c.detail) + '</span>' + (who ? '<span>' + who + '</span>' : '') + '</span><span class="ck">' + (on ? '✓' : '＋') + '</span></button>';
+    };
+    return '<div class="sec"><h2>Визит без услуг</h2><div class="card">' +
+      (S.conts.length ? '<div class="hint" style="margin:0 0 8px">Продолжение лечения пациента' + (S.conts.length > 1 ? ' — выберите, что записать (можно несколько)' : '') + ':</div>' + S.conts.map(card).join('')
+        : '<div class="hint" style="margin:0 0 8px">Незавершённого лечения у пациента не найдено.</div>') +
+      '<div class="cbtns">' + (S.manualOk ? '<span class="hint">Все шаблоны — ниже, в разделе «Шаблоны».</span>' : '<button class="addb" id="manualok">✍️ Выбрать шаблон вручную</button>') +
+      (SVCV() ? '<button class="link" data-view="svc">🧾 Добавить услуги в визит</button>' : '') + '</div></div></div>';
   }
 
   /* =====================================================================
@@ -494,6 +543,12 @@
   .lock.show{display:flex}
   .lk{background:#fff;color:#0f172a;border-radius:18px;padding:22px 24px;max-width:420px;box-shadow:0 24px 64px rgba(15,23,42,.35);font-size:14px;line-height:1.5}
   .lk b{display:block;font-size:16px;margin-bottom:6px} .lk p{margin:0 0 14px;color:#334155}
+  .cont{display:flex;align-items:center;gap:10px;width:100%;text-align:left;border:1.5px solid #e2e8f0;background:#fff;border-radius:12px;padding:10px 12px;margin:0 0 7px;cursor:pointer;color:#0f172a}
+  .cont:hover{border-color:#818cf8} .cont.on{border-color:#6366f1;background:linear-gradient(135deg,rgba(14,165,163,.08),rgba(99,102,241,.12))}
+  .cont .ci{font-size:22px} .cont .ct{flex:1;display:flex;flex-direction:column;gap:3px;min-width:0} .cont .ct b{font-size:13.5px} .cont .ct>span{font-size:12px;color:#475569}
+  .cont .ck{font-size:16px;font-weight:800;color:#4f46e5;width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#eef2ff;flex:none}
+  .cont.on .ck{background:#4f46e5;color:#fff}
+  .cbtns{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:4px}
   .ftnote{flex-basis:100%;font-size:12.5px;font-weight:600;color:#166534;background:#dcfce7;border-radius:10px;padding:7px 10px}
   .wrap{position:fixed;inset:0;z-index:2147483001;pointer-events:none}
   .shade{position:absolute;inset:0;background:rgba(15,23,42,.18);opacity:0;transition:opacity .25s}
@@ -623,8 +678,7 @@
     const out = { svc: false, diary: false };
     try {
       if (!document.querySelector('[ng-controller="VisitFormController"]')) return out;
-      const n = document.querySelectorAll('tr[ng-controller="VisitServiceItemController"]').length;
-      if (!n) { out.svc = true; return out; }
+      // визит без услуг бывает нормой (ортопедия с оплатой в конце) — точку ставим только на пустой дневник
       const c = getCtx(); out.diary = !c || jEmpty(c.j);
     } catch (e) { /* */ }
     return out;
@@ -780,7 +834,6 @@
   // ---- вкладки панели: «Услуги» (svc-engine.js) и «Дневник» (медзапись) ----
   let VIEW = 'svc';
   const SVCV = () => globalThis.SQNSMZ_SVCVIEW || null;
-  const noServices = () => S && !S.services.length && !S.blocks.some((b) => !tplById(b.tpl).fixed) && !S.manualOk;
   const SVC_API = {
     toast: (m, l) => toast(m, l), rerender: () => render(), rebuild: () => buildInitialState(),
     fmtTooth, marks: () => fMarks(), page: () => PAGE,
@@ -813,10 +866,10 @@
     let h = '<div class="hd"><div style="font-size:26px">🦷</div><h1>Медзапись<small>' +
       (ctx ? (ctx.list.length > 1 ? 'Дневников в визите: ' + ctx.list.length : 'Дневник найден') + ' · услуг в визите: ' + S.services.length : 'Дневник не найден') + ' · v' + ENGINE_VERSION + '</small></h1><button class="x" id="refresh" title="Перечитать страницу (планы, формулу, услуги)">↻</button><button class="x" id="close">×</button></div><div class="body">' + viewTabs();
 
-    if (noServices() && SVCV()) {
-      h += '<div class="card empty">Сначала добавьте услуги в визит —<br>по ним подберутся шаблоны дневника.<br><br>' +
-        '<button class="btn pri" data-view="svc" style="flex:none">🧾 Перейти к услугам</button><br><br><button class="link" id="manualok">Заполнить дневник вручную</button></div></div>';
-      P.innerHTML = h; bind(P); return;
+    // визит без услуг: продолжение лечения или шаблон вручную (дневник без услуг не запрещаем)
+    if (!S.services.length) {
+      h += contCard();
+      if (!S.contPick.size && !S.manualOk) { h += '</div>'; P.innerHTML = h; bind(P); return; }
     }
 
     if (!ctx) {
@@ -839,7 +892,7 @@
         return '<button class="tile' + (n ? ' on' : '') + '" data-add="' + t.id + '" title="Добавить блок «' + esc(t.title) + '»">' +
           '<span class="ti-ic">' + t.icon + '</span><span class="ti-t">' + esc(t.title) + '</span>' +
           (n ? '<span class="ti-n">' + (n > 1 ? '×' + n : '✓') + '</span>' : '<span class="ti-p">＋</span>') +
-          (n ? '<span class="ti-s">' + (auto ? 'из услуг' : byPlan ? 'по плану' : 'вручную') + '</span>' : '') + '</button>';
+          (n ? '<span class="ti-s">' + (auto ? 'из услуг' : bs.some((b) => b.contId) ? 'продолжение' : byPlan ? 'по плану' : 'вручную') + '</span>' : '') + '</button>';
       }).join('') + '</div><div class="hint" style="margin-top:6px">Нажмите, чтобы добавить блок. Сменить шаблон блока — в его заголовке, удалить — ×.</div></div></div>';
 
     // Услуги визита
@@ -927,7 +980,8 @@
     if (q('rescan')) q('rescan').onclick = () => { buildInitialState(); render(); };
     if (q('refresh')) q('refresh').onclick = () => { buildInitialState(); render(); toast('Данные страницы перечитаны'); };
     bindViews(P);
-    if (q('manualok')) q('manualok').onclick = () => { S.manualOk = true; render(); };
+    if (q('manualok')) q('manualok').onclick = () => { S.manualOk = true; CONT_MEM = { visit: visitKey(), ids: [...S.contPick], manual: true }; render(); };
+    on('[data-cont]', 'click', (e) => { toggleCont(e.currentTarget.dataset.cont); render(); });
     if (q('insert')) q('insert').onclick = doInsert;
     if (q('undo')) q('undo').onclick = doUndo;
     if (q('dur')) q('dur').onchange = (e) => { S.duration = Math.max(5, +e.target.value || DEFAULT_DURATION); render(); };

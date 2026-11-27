@@ -386,10 +386,7 @@
       if (ops.ready) { const nb = E.newBlock('orthoExam', [], 'auto'); nb.autoNote = 'есть план лечения'; blocks.splice(blocks.indexOf(b), 1, nb); return; }
       if (wantStage) { const sb = stageBlocks(); if (sb.length) blocks.splice(blocks.indexOf(b), 1, ...sb); }
     });
-    if (blocks.length === 1 && !(E.services || []).length) {
-      if (ops.ready) { const nb = E.newBlock('orthoExam', [], 'auto'); nb.autoNote = 'есть план лечения'; blocks.push(nb); }
-      else if (wantStage) blocks.push(...stageBlocks());
-    }
+    // визит без услуг: продолжение лечения предлагает движок через continuations() — здесь блоки не добавляем
     // абатменты из ортопедического раздела в ортопедическом визите (без приёма хирурга) — часть этапа протезирования, не хирургия
     const svcs = E.services || [];
     const orthoVisit = blocks.some((b) => /^ortho/.test(b.tpl)) || svcs.some((s) => s.code.startsWith('A16.07.006') && /коронк|протез|балк/i.test(s.name));
@@ -753,10 +750,75 @@
       if (pg.visitId && (v.id === pg.visitId || v.visitID === pg.visitId)) return;
       (v.journals || []).forEach((j) => {
         const d = dDay(j.startDate || v.date || v.startDate); if (d && d >= vd) return;
-        out.push({ text: (j.journalItems || []).map((it) => strip(it.content)).join(' '), date: d });
+        out.push({ text: (j.journalItems || []).map((it) => strip(it.content)).join(' '), raw: (j.journalItems || []).map((it) => rawText(it.content)).join(' '), date: d, emp: empOf(v, j) });
       });
     });
-    ((pg && pg.otherJournals) || []).forEach((j) => out.push({ text: (j.journalItems || []).map((it) => strip(it.content)).join(' '), date: vd }));
+    ((pg && pg.otherJournals) || []).forEach((j) => out.push({ text: (j.journalItems || []).map((it) => strip(it.content)).join(' '), raw: (j.journalItems || []).map((it) => rawText(it.content)).join(' '), date: vd, emp: [], cur: true }));
+    return out;
+  }
+  const rawText = (h) => String(h || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ');
+  // Кто вёл запись (проверено пробой 27.11.2026): врач визита — visit.employeeID / visit.employee.id;
+  // запасной вариант — автор дневника journal.creatorID / journal.creator.id. Сравнивается с currentEmployeeId и currentUserId.
+  function empOf(v, j) {
+    const ids = [], add = (x) => { if (x != null && x !== '') ids.push(String(x)); };
+    if (v) { add(v.employeeID); if (v.employee && typeof v.employee === 'object') add(v.employee.id); }
+    if (!ids.length && j) { add(j.creatorID); if (j.creator && typeof j.creator === 'object') add(j.creator.id); }
+    return [...new Set(ids)];
+  }
+
+  /* ---------- ПРОДОЛЖЕНИЕ ЛЕЧЕНИЯ: что предложить в визите без услуг ----------
+   * Каждый вариант: { id, icon, title, detail, date, emp[], make(E) → blocks }. emp — кто вёл прошлые записи (может быть пусто).
+   */
+  const OP_KINDS = [
+    [/мембраны Шнайдера|трепанационного окна/i, 'открытого синус-лифтинга'], [/элевация дна верхнечелюстной/i, 'закрытого синус-лифтинга'],
+    [/Установлен\S*[^.]*имплантат/i, 'имплантации'], [/декортикаци|расщеплени\S* альвеолярного/i, 'костной пластики'],
+    [/удален\S* зуб|экстракци/i, 'удаления зуба'], [/формировател\S* десны|абатмент/i, 'установки формирователей десны'],
+    [/гингивопластик|соединительнотканн/i, 'пластики мягких тканей'],
+  ];
+  // номера зубов из текста записи («2.6»), без диаметров имплантатов (Ø3.5×10) и размеров в мм
+  const teethFromText = (t) => [...new Set([...String(t).matchAll(/(?<![Ø\d.,])([1-4])\.([1-8])(?![\d×x])(?!\s*мм)/g)].map((m) => m[1] + m[2]))].sort();
+  function continuations(pg) {
+    const out = [], hist = stageHistory(pg).filter((h) => !h.cur);
+    const empsOf = (list) => [...new Set(list.flatMap((h) => h.emp || []))];
+    // ортопедия: принятый план → обследование и план, затем этапы по маршрутам
+    const ops = orthoPlanState(pg);
+    if (ops.ready) {
+      const pl = ops.pending[0];
+      out.push({ id: 'orthoExam', icon: '📋', title: 'Ортопедия: обследование и план', detail: 'План «' + ((pl && pl.title) || 'План') + '» принят в лечение, записи с планом ещё не было', date: dDay(pl && (pl.date || pl.created_at)), emp: [],
+        make: (E) => { const nb = E.newBlock('orthoExam', [], 'auto'); nb.autoNote = 'продолжение: есть план лечения'; return [nb]; } });
+    } else if (ops.plans.length) {
+      const RR = detectRoutes(pg), avail = ROUTE_ORDER.filter((r) => RR[r]), st = {};
+      avail.forEach((r) => { st[r] = routeStatus(r, pg); });
+      let rs = avail.filter((r) => st[r].started && !st[r].finished);
+      if (!rs.length) { const f = avail.find((r) => !st[r].finished); if (f) rs = [f]; }
+      if (rs.includes('fixed') && st.fixed.suggest.includes('fix')) { const rem = ['removable', 'complete'].find((r) => RR[r] && !st[r].started); if (rem && !rs.includes(rem)) rs.push(rem); }
+      rs.forEach((r) => {
+        const S2 = st[r], next = S2.list.filter((x) => S2.suggest.includes(x.id)).map((x) => x.t).join(' + ');
+        const src = hist.filter((h) => /Составлен план лечения/.test(h.text) || STAGES[r].some((x) => x.det && x.det.test(h.text)));
+        const T = ((S2.R && S2.R.teeth) || []).slice().sort();
+        out.push({ id: 'ortho:' + r, icon: '👑', title: 'Ортопедия: ' + ROUTES[r].title + (T.length ? ' · ' + T.map(fmtTooth).join(', ') : ''),
+          detail: (S2.started ? 'Следующий этап: ' : 'Первый этап: ') + (next || 'выберите этап'), date: Math.max(0, ...src.map((h) => h.date || 0)), emp: empsOf(src),
+          make: (E) => { const nb = E.newBlock('orthoStage', [], 'auto'); nb.autoNote = 'продолжение лечения'; nb.svcNames = []; stageInit(nb, E.page, r); return [nb]; } });
+      });
+    }
+    // послеоперационный осмотр: операция за последние 60 дней, после неё ещё не было осмотра (или швы не сняты)
+    const vd = dDay(pg && pg.visitDate) || dDay(new Date());
+    const ops2 = hist.filter((h) => /Гемостаз достигнут/.test(h.text) && h.date && vd - h.date <= 60 * 864e5).sort((a, b) => b.date - a.date);
+    const op = ops2[0];
+    if (op) {
+      const checks = hist.filter((h) => /контрольный осмотр после/i.test(h.text) && h.date >= op.date);
+      const sut = /Наложены швы|наложены швы/.test(op.text), catgut = /кетгут/i.test(op.text);
+      const sutOff = checks.some((h) => /Снятие швов/.test(h.text));
+      if (!checks.length || (sut && !catgut && !sutOff)) {
+        const kinds = OP_KINDS.filter(([re]) => re.test(op.raw)).map(([, n]) => n).slice(0, 2);
+        const opName = kinds.length ? kinds.join(' и ') : 'операции', teeth = teethFromText(op.raw), dt = fmtD(op.date);
+        out.push({ id: 'postop', icon: '🩺', title: 'Осмотр после ' + opName + (teeth.length ? ' · ' + teeth.map(fmtTooth).join(', ') : ''),
+          detail: 'Операция от ' + dt + (checks.length ? ' · был осмотр, швы ещё не сняты' : ' · осмотра ещё не было'), date: op.date, emp: op.emp || [],
+          make: (E) => { const nb = E.newBlock('postop', teeth, 'auto'); nb.autoNote = 'продолжение: после операции от ' + dt;
+            nb.params.op = opName; nb.params.opDate = dt; nb.auto.op = 1;
+            nb.params.sutOut = sut && !catgut && checks.length > 0 ? true : sut && !catgut && vd - op.date >= 7 * 864e5; nb.auto.sutOut = 1; return [nb]; } });
+      }
+    }
     return out;
   }
   function routeStages(r, R) { return (STAGES[r] || []).filter((s) => !s.need || s.need(R || {})); }
@@ -1625,6 +1687,8 @@
       id: 'postop', title: 'Послеоперационный осмотр', icon: '🩺', position: 'surgeon', order: 48, teethOptional: true,
       params: [
         { key: 'state', label: 'Состояние', type: 'seg', options: [opt('ok', 'Без особенностей'), opt('edema', 'Умеренный отёк')], default: 'ok' },
+        { key: 'op', label: 'После операции', type: 'text', default: '', placeholder: 'например: удаления зуба' },
+        { key: 'opDate', label: 'Дата операции', type: 'text', default: '', placeholder: 'дд.мм.гггг', adv: true },
         { key: 'sutOut', label: 'Снятие швов', type: 'toggle', default: true },
         { key: 'diag', label: 'Диагноз', type: 'select', options: [
           opt('Z48.8', 'Z48.8 Послеоперационное наблюдение', { mkb: ['Z48.8', 'Z48.8 Другой уточненный последующий хирургический уход'], name: 'Послеоперационное наблюдение' }),
@@ -1636,7 +1700,7 @@
       fields: (p, T, P) => {
         const at = T.has ? ' в области ' + T.gen : '';
         return {
-          complaints: p.state === 'ok' ? 'Жалоб нет. Явился на контрольный осмотр после операции.' : 'Жалобы на умеренный отёк в области вмешательства. Явился на контрольный осмотр после операции.',
+          complaints: (p.state === 'ok' ? 'Жалоб нет.' : 'Жалобы на умеренный отёк в области вмешательства.') + ' Явился на контрольный осмотр после ' + (String(p.op || '').trim() || 'операции') + (String(p.opDate || '').trim() ? ' от ' + String(p.opDate).trim() : '') + '.',
           statusLocalis: 'Послеоперационная область' + at + (p.state === 'ok' ? ' без признаков воспаления, заживление первичным натяжением.' : ': умеренный отёк мягких тканей, без признаков нагноения, заживление первичным натяжением.') + ' Швы состоятельны.',
           diagnosis: P.diag.name + at + ', ' + P.diag.mkb[0] + '.',
           treatment: 'Осмотр послеоперационной области' + at + ', антисептическая обработка.' + (p.sutOut ? ' Снятие швов.' : ''),
@@ -1798,5 +1862,5 @@
   ];
 
   function formulaMarks(f) { const F = readFormula(f); const ks = Object.keys(F); return { missing: ks.filter((t) => !isImplant(F[t]) && (F[t].includes('removed') || F[t].includes('bridge_intermediate'))), implant: ks.filter((t) => isImplant(F[t])) }; }
-  globalThis.SQNSMZ_CONFIG = { formulaMarks, _test: { kennedy, readFormula, formulaText, planText }, postBuild, IMPLANT_SYSTEMS, POSITIONS, POSITION_BY_CODE, SERVICE_RULES, DEFAULT_DURATION, ADMISSION_CONDITION, DIAG_DEFAULTS, fmtTooth, TEMPLATES };
+  globalThis.SQNSMZ_CONFIG = { continuations, formulaMarks, _test: { kennedy, readFormula, formulaText, planText }, postBuild, IMPLANT_SYSTEMS, POSITIONS, POSITION_BY_CODE, SERVICE_RULES, DEFAULT_DURATION, ADMISSION_CONDITION, DIAG_DEFAULTS, fmtTooth, TEMPLATES };
 })();

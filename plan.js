@@ -380,7 +380,11 @@
   // формула-подсказка для сеток зубов внутри блока
   const marksOf = (j) => { try { return j && C().formulaMarks ? C().formulaMarks(j) : null; } catch (e) { return null; } };
 
+  // перерисовка, когда пришли цены: одна на пачку (цены приходят по одной, подряд)
+  let RT = null, RAPI = null;
+  const laterRender = () => { if (RT || !RAPI) return; RT = setTimeout(() => { RT = null; RAPI.rerender(); }, 40); };
   function render(API) {
+    RAPI = API;
     FMT = API.fmtTooth || FMT;
     const tab = tabScope(), cl = clientOf(tab);
     if (!PS || (cl && PS.client && cl !== PS.client)) { PS = blank(); ACT = null; }
@@ -406,8 +410,7 @@
       if (s && cur && cur !== SET.st && s.blocks[ACT.bi] === SET.st) s.blocks[ACT.bi] = cur;
     }
     SET = null;
-    const rr = () => API.rerender();
-    const calcs = PS.stages.map((s, i) => (s.ro ? null : calcStage(i, rr)));
+    const calcs = PS.stages.map((s, i) => (s.ro ? null : calcStage(i, laterRender)));
     const openSi = PS.stages.findIndex((s) => s.open), B = PS.busy, ch = chain();
     let h = '<div class="sec"><button class="link" data-pl="back"' + (B || openSi >= 0 ? ' disabled' : '') + '>← Все планы</button></div>';
     h += '<div class="sec"><div class="card"><div class="pl-in" style="margin:0"><label>Название плана</label><input type="text" data-plt="1" value="' + esc(PS.titleTouched ? PS.title : '') + '" placeholder="' + esc(autoTitle(calcs)) + '"></div>' +

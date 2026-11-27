@@ -29,6 +29,14 @@
 
   /* ---------------- карточки услуг из SQNS (цены — актуальные) ---------------- */
   const CARD = {}, CARD_LOAD = {};
+  // Цена ещё грузится: перерисовать ОДИН раз, когда придёт. Без этого каждая перерисовка вешала новый обработчик
+  // на ту же загрузку, и с каждой пришедшей ценой перерисовок становилось вдвое-втрое больше (план из нескольких этапов вешал вкладку).
+  const WAIT = {};
+  function whenCard(id, cb) {
+    if (WAIT[id]) { WAIT[id].add(cb); return; }
+    WAIT[id] = new Set([cb]);
+    loadCard(id).then((x) => { const cbs = WAIT[id]; delete WAIT[id]; if (x && CARD[id]) cbs.forEach((f) => { try { f(); } catch (e) { /* */ } }); });
+  }
   function loadCard(id) {
     if (CARD[id]) return Promise.resolve(CARD[id]);
     if (CARD_LOAD[id]) return CARD_LOAD[id];
@@ -535,7 +543,7 @@
       h += '<div class="sec"><h2>' + esc(sc.icon + ' ' + sc.title) + '</h2><div class="card">' + (sc.needTeeth && !sc.params.some((x) => x.type === 'teethPick') ? renderTeeth(API, sc.teethTitle) : '') + renderList(sc.params, API) + '</div></div>';
       const L = lines(); let total = 0, missingPrice = false;
       h += '<div class="sec"><h2>' + (PL ? 'В этап' : 'Будет добавлено') + '</h2><div class="card cart">' + (L.length ? L.map((l) => {
-        const c = CARD[l.id]; if (!c) { loadCard(l.id).then((x) => { if (x) API.rerender(); }); }
+        const c = CARD[l.id]; if (!c) whenCard(l.id, API.rerender);
         const price = c ? parseFloat(c.price) || 0 : null; if (!l.skip) { if (price == null) missingPrice = true; else total += price * l.qty; }
         return '<div class="cl' + (l.skip ? ' skip' : '') + '"><div><div class="cd">' + esc(l.code) + '</div>' + esc(l.name) +
           ((l.teeth || []).length ? ' ' + l.teeth.slice().sort().map((t) => '<span class="tchip">' + API.fmtTooth(t) + '</span>').join(' ') : '') +
@@ -692,7 +700,7 @@
   function cartOf(onPrice) {
     const sc = scnById(SS.scn); if (!sc) return { lines: [], total: 0, missing: false, bad: true, issues: [] };
     const L = lines().filter((l) => !l.skip); let total = 0, missing = false;
-    L.forEach((l) => { const c = CARD[l.id]; if (!c) { missing = true; loadCard(l.id).then((x) => { if (x && onPrice) onPrice(); }); } else total += (parseFloat(c.price) || 0) * l.qty; });
+    L.forEach((l) => { const c = CARD[l.id]; if (!c) { missing = true; if (onPrice) whenCard(l.id, onPrice); else loadCard(l.id); } else total += (parseFloat(c.price) || 0) * l.qty; });
     const iss = sc.check ? sc.check(effParams(), SS.teeth, { touched: SS.touched }) : [];
     return { lines: L, total, missing, issues: iss, bad: iss.some((i) => i.lvl === 'bad') || !L.length };
   }

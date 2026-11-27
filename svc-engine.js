@@ -11,7 +11,7 @@
   const D = globalThis.SQNSMZ_SERVICES;
   if (!D) { console.error('[Медзапись] services.js не загружен'); return; }
   const { SVC, SCENARIOS } = D;
-  const CATS = D.CATS || [{ id: 'all', title: 'Сценарии', icon: '🧾' }];
+  const CATS_ALL = D.CATS || [{ id: 'all', title: 'Сценарии', icon: '🧾' }];
 
   const own = (o, k) => o && Object.prototype.hasOwnProperty.call(o, k);
   const up = (sc, fn) => { let p = sc; while (p) { if (own(p, fn) && typeof p[fn] === 'function') return p; p = p.$parent; } return null; };
@@ -489,15 +489,22 @@
       (M && (M.missing.length || M.implant.length) ? '<div class="ff"><span class="hint">формула пациента: 0 — нет зуба, И — имплантат</span></div>' : '') + hintH + '</div>';
   }
 
+  // разделы, разрешённые текущему врачу (настройки врача в doctors.js)
+  const catOk = (id) => { const D2 = globalThis.SQNSMZ_DOCTORS; return !D2 || D2.allowed(id); };
   function render(API) {
-    if (!SS) { const last = lsGet(); SS = fresh(scnById(last) ? last : SCENARIOS[0].id); }
+    const okScn = (x) => x && catOk(x.cat || 'all');
+    if (!SS || !okScn(scnById(SS.scn))) {
+      const last = lsGet(), first = SCENARIOS.find(okScn) || SCENARIOS[0];
+      SS = fresh(okScn(scnById(last)) ? last : first.id); OPEN_CAT = undefined;
+    }
+    const CATS = CATS_ALL.filter((c) => catOk(c.id));
     const sc = scnById(SS.scn);
     // свои типы полей (ортопедия): один раз подтянуть формулу SQNS
     if (sc) sc.params.forEach((pr) => { const TY = (D.TYPES || {})[pr.type]; if (TY && TY.prepare && TY.prepare(SS.params[pr.key], () => fInfo(API))) autoParams(SS); });
     let h = '';
     // выбор сценария: разделы → список шаблонов (подгруппы — sub)
     if (OPEN_CAT === undefined) OPEN_CAT = sc ? sc.cat : null;
-    h += '<div class="sec"><h2>Что делаем</h2><div class="card"><div class="cats">' + CATS.map((c) => {
+    h += '<div class="sec"><h2>Что делаем</h2><div class="card"><div class="cats" style="grid-template-columns:repeat(' + Math.max(1, CATS.length) + ',1fr)">' + CATS.map((c) => {
       const has = sc && sc.cat === c.id;
       return '<button class="cat' + (OPEN_CAT === c.id ? ' open' : '') + (has ? ' has' : '') + '" data-scat="' + c.id + '"><span class="ti-ic">' + c.icon + '</span><span class="ti-t">' + esc(c.title) + '</span><span class="cv">' + (OPEN_CAT === c.id ? '▴' : '▾') + '</span></button>';
     }).join('') + '</div>';
@@ -539,8 +546,10 @@
       if (iss.length) h += '<div class="sec"><h2>Проверка</h2><div class="iss">' + iss.map((i) => '<div class="' + i.lvl + '">' + (i.lvl === 'bad' ? '⛔' : '⚠️') + ' ' + esc(i.text) + '</div>').join('') + '</div></div>';
       SS._bad = iss.some((i) => i.lvl === 'bad' && i.text !== SS.error) || !L.some((l) => !l.skip);
     }
-    const foot = (SS.done ? '<button class="btn sec2" id="svcundo">↶ Отменить добавление</button><button class="btn sec2" id="svcdiary">📝 К дневнику</button>' : '') +
-      '<button class="btn pri" id="svcadd"' + (SS._bad || SS.busy ? ' disabled' : '') + '>' + (SS.busy ? 'Добавляю…' : 'Добавить в визит') + '</button>';
+    // после добавления следующий шаг — дневник: он становится главной кнопкой
+    const foot = SS.done && !SS.busy
+      ? '<button class="btn sec2" id="svcundo">↶ Отменить</button><button class="btn sec2" id="svcadd"' + (SS._bad ? ' disabled' : '') + '>＋ Добавить ещё</button><button class="btn pri" id="svcdiary">📝 Заполнить дневник →</button>'
+      : '<button class="btn pri" id="svcadd"' + (SS._bad || SS.busy ? ' disabled' : '') + '>' + (SS.busy ? 'Добавляю…' : 'Добавить в визит') + '</button>';
     return { body: h, foot };
   }
 

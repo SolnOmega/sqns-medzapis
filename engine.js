@@ -31,7 +31,7 @@
   const LAT = { 'А': 'A', 'В': 'B', 'С': 'C', 'Е': 'E', 'К': 'K', 'М': 'M', 'Н': 'H', 'О': 'O', 'Р': 'P', 'Т': 'T', 'Х': 'X' };
   const normCode = (name) => ((name || '').trim().split(/\s+/)[0] || '').replace(/[АВСЕКМНОРТХ]/g, (c) => LAT[c]);
 
-  const ENGINE_VERSION = '1.7.7';
+  const ENGINE_VERSION = '1.8.1';
   // В визите может быть несколько дневников: SQNS держит их все на странице (каждый со своим journalIndex).
   // Какой открыт, по странице не понять, поэтому: выбранный в панели → иначе последний пустой → иначе последний.
   let JPICK = null;   // индекс дневника, выбранный врачом в панели
@@ -476,10 +476,25 @@
   const CSS = `
   :host{all:initial}
   *{box-sizing:border-box;font-family:Inter,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
-  .tab{position:fixed;right:0;top:42%;z-index:2147483000;display:flex;align-items:center;gap:8px;padding:12px 14px 12px 12px;
-    background:linear-gradient(135deg,#0ea5a3,#6366f1);color:#fff;border-radius:14px 0 0 14px;cursor:pointer;
-    box-shadow:0 8px 28px rgba(79,70,229,.35);font-size:13px;font-weight:600;transform:translateX(calc(100% - 46px));transition:transform .25s ease}
-  .tab:hover{transform:translateX(0)} .tab .ic{font-size:20px;line-height:1}
+  .strip{position:fixed;top:0;left:0;right:0;height:4px;z-index:2147483000;pointer-events:none;display:none}
+  .strip.show{display:block}
+  .dock{position:fixed;right:0;top:34%;z-index:2147483000;display:flex;flex-direction:column;align-items:stretch;gap:6px}
+  .di{position:relative;display:flex;align-items:center;gap:9px;height:42px;padding:0 14px 0 11px;border:1px solid #e2e8f0;border-right:0;border-radius:13px 0 0 13px;
+    background:#fff;color:#0f172a;cursor:pointer;font-size:13px;font-weight:700;white-space:nowrap;box-shadow:0 6px 20px rgba(15,23,42,.14);
+    transform:translateX(calc(100% - 48px));transition:transform .22s ease,background .15s}
+  .dock:hover .di,.dock.pin .di{transform:none} .di:hover{background:#f1f5f9}
+  .di .ic{width:24px;text-align:center;font-size:19px;line-height:1;flex:none}
+  .di.doc{background:var(--c);border-color:var(--c);color:#fff;height:46px} .di.doc:hover{filter:brightness(1.07);background:var(--c)}
+  .di.doc .av{width:28px;height:28px;margin:0 -2px;border-radius:50%;background:#fff;color:var(--c);display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:800;flex:none}
+  .di.doc .cv{font-size:11px;opacity:.85}
+  .di.warn{--c:#f59e0b} .di.gray{--c:#94a3b8}
+  .di .nd{position:absolute;left:6px;top:6px;width:9px;height:9px;border-radius:50%;background:#ef4444;border:2px solid #fff}
+  .di.soon{color:#94a3b8} .di .sn{font-size:10px;font-weight:700;background:#f1f5f9;color:#64748b;border-radius:8px;padding:1px 6px}
+  .lock{position:fixed;inset:0;z-index:2147483003;background:rgba(15,23,42,.55);display:none;align-items:center;justify-content:center}
+  .lock.show{display:flex}
+  .lk{background:#fff;color:#0f172a;border-radius:18px;padding:22px 24px;max-width:420px;box-shadow:0 24px 64px rgba(15,23,42,.35);font-size:14px;line-height:1.5}
+  .lk b{display:block;font-size:16px;margin-bottom:6px} .lk p{margin:0 0 14px;color:#334155}
+  .ftnote{flex-basis:100%;font-size:12.5px;font-weight:600;color:#166534;background:#dcfce7;border-radius:10px;padding:7px 10px}
   .wrap{position:fixed;inset:0;z-index:2147483001;pointer-events:none}
   .shade{position:absolute;inset:0;background:rgba(15,23,42,.18);opacity:0;transition:opacity .25s}
   .panel{position:absolute;top:12px;right:12px;bottom:12px;width:min(560px,calc(100vw - 24px));background:#f8fafc;border-radius:20px;
@@ -565,7 +580,7 @@
   .pf .lb .sp{flex:1} .pf .rs{border:0;background:none;color:#64748b;cursor:pointer;font-size:12px}
   .iss{font-size:12.5px;display:flex;flex-direction:column;gap:5px}
   .iss div{display:flex;gap:7px;align-items:flex-start;padding:7px 9px;border-radius:10px}
-  .ft{padding:12px 14px;background:#fff;border-top:1px solid #e2e8f0;display:flex;gap:8px;align-items:center}
+  .ft{padding:12px 14px;background:#fff;border-top:1px solid #e2e8f0;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
   .btn{border:0;border-radius:12px;padding:11px 16px;font-weight:700;font-size:13.5px;cursor:pointer}
   .pri{flex:1;background:linear-gradient(135deg,#0ea5a3,#6366f1);color:#fff;box-shadow:0 6px 18px rgba(79,70,229,.3)}
   .pri:disabled{background:#cbd5e1;box-shadow:none;cursor:not-allowed}
@@ -585,18 +600,78 @@
     host = document.createElement('div'); host.id = 'sqns-medzapis';
     document.body.appendChild(host);
     root = host.attachShadow({ mode: 'open' });
-    root.innerHTML = '<style>' + CSS + ((globalThis.SQNSMZ_SVCVIEW || {}).css || '') + '</style>' +
-      '<div class="tab" id="tab"><span class="ic">🦷</span><span>Медзапись</span></div>' +
+    root.innerHTML = '<style>' + CSS + ((globalThis.SQNSMZ_SVCVIEW || {}).css || '') + (DOCS() ? DOCS().css : '') + '</style>' +
+      '<div class="strip" id="strip"></div><div class="dock" id="dock"></div><div class="dpop" id="dpop"></div>' +
       '<div class="wrap" id="wrap"><div class="shade" id="shade"></div><div class="panel" id="panel"></div></div>' +
-      '<div class="toast" id="toast"></div>';
+      '<div class="toast" id="toast"></div><div class="lock" id="lock"></div>';
     wrap = root.getElementById('wrap');
-    root.getElementById('tab').onclick = () => openPanel();
     root.getElementById('shade').onclick = () => closePanel();
+    root.getElementById('dock').addEventListener('click', (e) => { const b = e.target.closest('[data-dk]'); if (b) { e.stopPropagation(); dockAction(b.dataset.dk); } });
+    DOCK_HTML = ''; renderDock(); renderPopIfOpen();
   }
-  // При открытии панели: в визите ещё нет услуг → вкладка «Услуги», услуги уже есть → «Дневник».
-  function openPanel() { buildInitialState(); undoSnap = undoSnap || null; if (SVCV()) VIEW = S.services.length ? 'diary' : 'svc';
+  // Открыть панель на нужной вкладке. Без указания: в визите нет услуг → «Услуги», есть → «Медзапись».
+  function openPanel(v) { buildInitialState(); undoSnap = undoSnap || null; togglePop(false);
+    if (SVCV()) VIEW = v === 'svc' || v === 'diary' ? v : (S.services.length ? 'diary' : 'svc');
     render(); wrap.classList.add('open'); isOpen = true; }
   function closePanel() { wrap.classList.remove('open'); isOpen = false; }
+
+  /* ---- боковые кнопки: врач, Услуги, Медзапись, План, Печать ---- */
+  const DOCS = () => globalThis.SQNSMZ_DOCTORS || null;
+  const tplAllowed = (t) => !DOCS() || DOCS().allowedPos(t.position);   // шаблоны дневника по разделам врача
+  let DOCK_HTML = '', popOpen = false;
+  function dockState() {   // красные точки: что ещё не сделано в открытом визите
+    const out = { svc: false, diary: false };
+    try {
+      if (!document.querySelector('[ng-controller="VisitFormController"]')) return out;
+      const n = document.querySelectorAll('tr[ng-controller="VisitServiceItemController"]').length;
+      if (!n) { out.svc = true; return out; }
+      const c = getCtx(); out.diary = !c || jEmpty(c.j);
+    } catch (e) { /* */ }
+    return out;
+  }
+  function renderDock() {
+    const D = root && root.getElementById('dock'); if (!D) return;
+    const st = dockState(), cur = DOCS() ? DOCS().current() : null, ok = (f) => !DOCS() || DOCS().allowed(f);
+    let doc = '';
+    if (cur) {
+      if (cur.mode === 'doc') doc = '<button class="di doc" style="--c:' + esc(cur.doc.color) + '" data-dk="doc" title="Сменить врача (Alt+D)"><span class="av">' + esc(cur.ini) + '</span><span>' + esc(cur.name) + '</span><span class="cv">▾</span></button>';
+      else if (cur.mode === 'login') doc = '<button class="di doc warn" data-dk="doc"><span class="av">→</span><span>' + esc(cur.text) + '</span><span class="cv">▾</span></button>';
+      else if (cur.mode !== 'none') doc = '<button class="di doc gray" data-dk="doc" title="Врачи (Alt+D)"><span class="av">' + (cur.mode === 'wait' ? '…' : '?') + '</span><span>' + esc(cur.text) + '</span><span class="cv">▾</span></button>';
+    }
+    const it = (k, ic, t, dot, extra) => '<button class="di' + (extra || '') + '" data-dk="' + k + '">' + (dot ? '<span class="nd"></span>' : '') + '<span class="ic">' + ic + '</span><span>' + t + '</span>' + (k === 'print' ? '<span class="sn">скоро</span>' : '') + '</button>';
+    const h = cur && cur.mode === 'login' ? doc : doc + (SVCV() ? it('svc', '🧾', 'Услуги', st.svc) : '') + it('diary', '📝', 'Медзапись', st.diary) + (ok('plan') ? it('plan', '📋', 'План') : '') + (ok('print') ? it('print', '🖨️', 'Печать', false, ' soon') : '');
+    if (h !== DOCK_HTML) { D.innerHTML = h; DOCK_HTML = h; }
+    D.classList.toggle('pin', popOpen);
+    const S2 = root.getElementById('strip');
+    if (cur && cur.mode === 'doc') { S2.style.background = cur.doc.color; S2.classList.add('show'); } else S2.classList.remove('show');
+  }
+  function renderPopIfOpen() {
+    const P = root && root.getElementById('dpop'); if (!P || !DOCS()) return;
+    P.classList.toggle('show', popOpen);
+    if (popOpen) {
+      P.innerHTML = DOCS().renderPop(); DOCS().bindPop(P);
+      const D = root.getElementById('dock'); D.classList.add('pin');   // окно — слева от раскрытых кнопок
+      setTimeout(() => { const w = Math.max(...[...D.children].map((x) => x.getBoundingClientRect().width), 60); P.style.right = (w + 10) + 'px'; }, 240);
+    }
+  }
+  function togglePop(v) { popOpen = v == null ? !popOpen : v; if (!popOpen && DOCS()) DOCS().POP.edit = null; renderPopIfOpen(); renderDock(); }
+  function dockAction(k) {
+    if (k === 'doc') { if (!DOCS()) return; if (isOpen) closePanel(); togglePop(); return; }
+    togglePop(false);
+    if (k === 'svc' || k === 'diary') { if (isOpen && VIEW === k) closePanel(); else openPanel(k); return; }
+    if (k === 'plan') {   // своей вкладки плана пока нет — открываем «Планы лечения» в карточке пациента
+      const a = document.querySelector('a[href="#treatmentPlan"]');
+      if (a) { closePanel(); a.click(); toast('Открыты «Планы лечения»'); } else toast('Откройте карточку пациента', 'warn');
+      return;
+    }
+    if (k === 'print') toast('Печать актов и планов — скоро', 'warn');
+  }
+  function lockTab(msg) {
+    const L = root && root.getElementById('lock'); if (!L) return;
+    if (!msg) { L.classList.remove('show'); return; }
+    L.innerHTML = '<div class="lk"><b>Врач сменился</b><p>' + esc(msg) + ' Эта вкладка теперь тоже работает от его имени — несохранённое здесь уйдёт не от того врача.</p><button class="btn pri" id="lkre" style="width:100%">Обновить страницу</button></div>';
+    L.classList.add('show'); L.querySelector('#lkre').onclick = () => location.reload();
+  }
   function toast(msg, lvl) {
     const t = root.getElementById('toast'); t.textContent = msg; t.className = 'toast show ' + (lvl || 'ok');
     clearTimeout(toast._t); toast._t = setTimeout(() => { t.className = 'toast ' + (lvl || 'ok'); }, 3200);
@@ -711,7 +786,7 @@
     fmtTooth, marks: () => fMarks(), page: () => PAGE,
     gotoDiary: () => { VIEW = 'diary'; buildInitialState(); render(); },
   };
-  const viewTabs = () => SVCV() ? '<div class="vtabs"><button data-view="svc" class="' + (VIEW === 'svc' ? 'on' : '') + '">🧾 Услуги</button><button data-view="diary" class="' + (VIEW === 'diary' ? 'on' : '') + '">📝 Дневник</button></div>' : '';
+  const viewTabs = () => '';   // вкладки заменены боковыми кнопками
   function bindViews(P) {
     P.querySelectorAll('[data-view]').forEach((el) => el.addEventListener('click', (e) => { VIEW = e.currentTarget.dataset.view; buildInitialState(); render(); }));
   }
@@ -759,7 +834,7 @@
     const userBlocks = S.blocks.filter((b) => !tplById(b.tpl).fixed);
     h += '<div class="sec"><h2>Шаблоны</h2><div class="card">' +
       (userBlocks.length ? '' : '<div class="hint" style="margin:0 0 8px">Шаблон не выбран — услуги не распознаны или их ещё нет. Выберите вручную:</div>') +
-      '<div class="tiles">' + TEMPLATES.filter((t) => !t.fixed).map((t) => {
+      '<div class="tiles">' + TEMPLATES.filter((t) => !t.fixed && tplAllowed(t)).map((t) => {
         const bs = userBlocks.filter((b) => b.tpl === t.id), n = bs.length, auto = bs.some((b) => b.src === 'service'), byPlan = bs.some((b) => b.src === 'auto');
         return '<button class="tile' + (n ? ' on' : '') + '" data-add="' + t.id + '" title="Добавить блок «' + esc(t.title) + '»">' +
           '<span class="ti-ic">' + t.icon + '</span><span class="ti-t">' + esc(t.title) + '</span>' +
@@ -784,7 +859,7 @@
     S.blocks.forEach((b) => {
       const t = tplById(b.tpl);
       h += '<div class="card"><div class="ch"><span class="em">' + t.icon + '</span>' + (t.fixed ? '<span class="ti">' + esc(t.title) + '</span>' :
-        '<select class="tsel" data-switch="' + b.uid + '">' + TEMPLATES.filter((x) => !x.fixed).map((x) => '<option value="' + x.id + '"' + (x.id === b.tpl ? ' selected' : '') + '>' + esc(x.title) + '</option>').join('') + '</select>') +
+        '<select class="tsel" data-switch="' + b.uid + '">' + TEMPLATES.filter((x) => !x.fixed && (tplAllowed(x) || x.id === b.tpl)).map((x) => '<option value="' + x.id + '"' + (x.id === b.tpl ? ' selected' : '') + '>' + esc(x.title) + '</option>').join('') + '</select>') +
         (b.src === 'service' ? badge('ok', 'из услуг') : b.src === 'auto' ? badge('ok', b.autoNote || 'подобран автоматически') : b.src === 'fixed' ? '' : badge('warn', 'добавлен вручную')) +
         (t.fixed ? '' : '<button class="del" data-del="' + b.uid + '" title="Удалить блок">×</button>') + '</div>' +
         renderTeeth(b) + (t.params || []).map((pr) => renderParam(b, pr)).join('') + advLink(b) + '</div>';
@@ -823,9 +898,9 @@
     // Проблемы
     if (iss.length) h += '<div class="sec"><h2>Проверка</h2><div class="iss">' + iss.map((i) => '<div class="' + i.lvl + '">' + (i.lvl === 'bad' ? '⛔' : '⚠️') + ' ' + esc(i.text) + '</div>').join('') + '</div></div>';
 
-    h += '</div><div class="ft">' + (undoSnap ? '<button class="btn sec2" id="undo">↶ Отменить вставку</button>' : '') +
+    h += '</div><div class="ft">' + (undoSnap ? '<div class="ftnote">✓ Вставлено. Проверьте поля и нажмите «Сохранить» в визите.</div><button class="btn sec2" id="undo">↶ Отменить вставку</button>' : '') +
       (ctx ? '<button class="btn sec2" id="mkdiary2" title="Добавить ещё один дневник приёма в этот визит">＋ Ещё дневник</button>' : '') +
-      '<button class="btn pri" id="insert"' + (hasBad ? ' disabled title="Исправьте пункты с ⛔"' : '') + '>Вставить в визит</button></div>';
+      '<button class="btn pri" id="insert"' + (hasBad ? ' disabled title="Исправьте пункты с ⛔"' : '') + '>' + (undoSnap ? 'Вставить заново' : 'Вставить в визит') + '</button></div>';
 
     P.innerHTML = h; bind(P);
     const fit = (t) => { t.style.height = 'auto'; t.style.height = (t.scrollHeight + 2) + 'px'; };
@@ -896,13 +971,24 @@
   /* =====================================================================
    *  8. ЗАПУСК
    * ===================================================================== */
-  document.addEventListener('keydown', (e) => { if (!root) return; if (e.altKey && e.code === 'KeyM') { e.preventDefault(); isOpen ? closePanel() : openPanel(); } if (e.key === 'Escape' && isOpen) closePanel(); }, true);
+  document.addEventListener('keydown', (e) => {
+    if (!root) return;
+    if (e.altKey && !e.ctrlKey && !e.metaKey) {
+      const k = { KeyM: 'toggle', Digit1: 'svc', Digit2: 'diary', Digit3: 'plan', KeyD: 'doc' }[e.code];
+      if (k) { e.preventDefault(); if (k === 'toggle') { isOpen ? closePanel() : openPanel(); } else dockAction(k); }
+    }
+    if (e.key === 'Escape') { if (popOpen) togglePop(false); else if (isOpen) closePanel(); }
+  }, true);
   console.log('%c[Медзапись] скрипт загружен', 'color:#6366f1;font-weight:bold');
+  let booted = false;
+  document.addEventListener('click', () => { if (popOpen) togglePop(false); });   // клик мимо окна врачей закрывает его
   const start = () => {
     try {
       if (!document.body) return;
       if (host && !document.body.contains(host)) { host = null; }   // страницу перерисовали — монтируем заново
       if (!host) { mount(); console.log('[Медзапись] кнопка добавлена'); }
+      if (!booted && DOCS()) { booted = true; DOCS().boot({ toast: (m, l) => toast(m, l), refresh: () => { renderDock(); renderPopIfOpen(); }, lock: lockTab }); }
+      renderDock();
       if (!S) { try { readPage(); } catch (e) { /* */ } }
     } catch (e) { console.error('[Медзапись] ошибка запуска', e); }
   };
